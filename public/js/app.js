@@ -1,6 +1,7 @@
 import { api, getToken, setToken } from './api.js';
 import { esc, toast } from './ui.js';
 import { state } from './state.js';
+import { renderLogin, renderRegister } from './views/auth.js';
 
 function renderHome(container) {
   container.innerHTML = `
@@ -46,6 +47,8 @@ function renderHeader() {
 
 const routes = [
   { pattern: /^\/$/, view: renderHome },
+  { pattern: /^\/login$/, view: renderLogin },
+  { pattern: /^\/register$/, view: renderRegister },
 ];
 
 async function route() {
