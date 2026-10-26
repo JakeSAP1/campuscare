@@ -13,6 +13,20 @@ export const esc = (value) =>
     "'": '&#39;',
   }[ch]));
 
+export const stars = (rating) => {
+  const rounded = Math.round(rating);
+  return '★'.repeat(rounded) + '☆'.repeat(5 - rounded);
+};
+
+export const plural = (count, [one, few, many]) => {
+  const mod100 = count % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  const mod10 = count % 10;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+};
+
 export function toast(message, type = 'info') {
   const item = document.createElement('div');
   item.className = `toast toast--${type}`;

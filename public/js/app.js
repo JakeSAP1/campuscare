@@ -2,6 +2,7 @@ import { api, getToken, setToken } from './api.js';
 import { esc, toast, TYPE_INFO } from './ui.js';
 import { state } from './state.js';
 import { renderLogin, renderRegister } from './views/auth.js';
+import { renderCatalog } from './views/catalog.js';
 
 function renderHome(container) {
   const cards = Object.entries(TYPE_INFO)
@@ -32,7 +33,7 @@ function renderHeader() {
     return;
   }
 
-  nav.innerHTML = '<a href="#/" data-route="/">Главная</a>';
+  nav.innerHTML = '<a href="#/" data-route="/">Главная</a><a href="#/catalog" data-route="/catalog">Каталог</a>';
   right.innerHTML = `
     <span class="user-chip">${esc(state.me.name)}</span>
     <button class="btn btn--ghost btn--sm" id="logout-btn">Выйти</button>`;
@@ -53,12 +54,15 @@ function renderHeader() {
 
 const routes = [
   { pattern: /^\/$/, view: renderHome },
+  { pattern: /^\/catalog$/, view: renderCatalog },
   { pattern: /^\/login$/, view: renderLogin },
   { pattern: /^\/register$/, view: renderRegister },
 ];
 
 async function route() {
-  const path = (location.hash.slice(1) || '/').split('?')[0];
+  const [rawPath, rawQuery] = (location.hash.slice(1) || '/').split('?');
+  const path = rawPath || '/';
+  const params = new URLSearchParams(rawQuery);
   const app = document.getElementById('app');
   const current = routes.find((r) => r.pattern.test(path));
 
@@ -73,7 +77,7 @@ async function route() {
   }
 
   renderHeader();
-  await current.view(app);
+  await current.view(app, params);
 }
 
 window.addEventListener('hashchange', route);

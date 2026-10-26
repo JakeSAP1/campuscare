@@ -365,6 +365,142 @@ main.container {
   font-size: 14px;
 }
 
+/* --- каталог --- */
+
+.page-title {
+  margin: 0 0 18px;
+  font-size: 26px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chip {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chip--active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.spec-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  text-decoration: none;
+  color: var(--text);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.spec-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(29, 36, 51, 0.14);
+}
+
+.spec-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spec-card__avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.spec-card__name {
+  display: block;
+  font-weight: 700;
+}
+
+.spec-card__type {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spec-card__spec {
+  font-size: 14px;
+}
+
+.spec-card__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.spec-card__count {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spec-card__formats {
+  display: flex;
+  gap: 6px;
+}
+
+.rating {
+  color: #e8a417;
+  font-size: 14px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.rating b {
+  color: var(--text);
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+
+.badge {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 #toast-root {
   position: fixed;
   right: 20px;
