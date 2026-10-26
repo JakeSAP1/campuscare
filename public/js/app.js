@@ -1,17 +1,23 @@
 import { api, getToken, setToken } from './api.js';
-import { esc, toast } from './ui.js';
+import { esc, toast, TYPE_INFO } from './ui.js';
 import { state } from './state.js';
 import { renderLogin, renderRegister } from './views/auth.js';
 
 function renderHome(container) {
+  const cards = Object.entries(TYPE_INFO)
+    .map(([type, info]) => `
+      <a class="type-card" href="#/catalog?type=${type}">
+        <span class="type-card__emoji">${info.emoji}</span>
+        <span class="type-card__label">${esc(info.label)}</span>
+        <span class="type-card__tagline">${esc(info.tagline)}</span>
+      </a>`)
+    .join('');
   container.innerHTML = `
     <section class="hero card">
       <h1>Запись на консультации без живой очереди</h1>
-      <p>Психологи, карьерные консультанты и тьюторы университета — выберите специалиста и удобное время онлайн.</p>
-      ${state.me
-        ? '<p class="form-hint">Каталог специалистов в разработке — он появится в ближайших обновлениях.</p>'
-        : `<p><a class="btn" href="#/register">Создать аккаунт</a> <a class="btn btn--ghost" href="#/login">Войти</a></p>`}
-    </section>`;
+      <p>Выберите тип консультации — дальше подберёте специалиста и удобное время.</p>
+    </section>
+    <section class="type-grid">${cards}</section>`;
 }
 
 function renderHeader() {

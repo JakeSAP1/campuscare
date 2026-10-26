@@ -1,3 +1,9 @@
+export const TYPE_INFO = {
+  psychologist: { label: 'Психолог', emoji: '🧠', tagline: 'Тревога, стресс, отношения, адаптация к вузу' },
+  career: { label: 'Карьерный консультант', emoji: '🎯', tagline: 'Профориентация, резюме, собеседования, стажировки' },
+  tutor: { label: 'Тьютор', emoji: '🧭', tagline: 'Организация учёбы, планирование, долги по дисциплинам' },
+};
+
 export const esc = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;',
