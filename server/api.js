@@ -111,3 +111,61 @@ api.post('/logout', requireAuth, (req, res) => {
 api.get('/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
+
+const ratingOf = (db, specialistId) => {
+  const list = db.reviews.filter((r) => r.specialistId === specialistId);
+  const avg = list.length ? list.reduce((sum, r) => sum + r.rating, 0) / list.length : 0;
+  return { rating: Math.round(avg * 10) / 10, reviewsCount: list.length };
+};
+
+const specialistCard = (db, user) => ({
+  id: user.id,
+  name: user.name,
+  type: user.type,
+  typeLabel: TYPES[user.type],
+  specialization: user.specialization,
+  formats: user.formats,
+  ...ratingOf(db, user.id),
+});
+
+const findSpecialist = (db, id) => db.users.find((u) => u.role === 'specialist' && u.id === id);
+const notFound = (res) => res.status(404).json({ error: 'Специалист не найден' });
+
+api.get('/specialists', (req, res) => {
+  const db = loadDb();
+  const { type, format } = req.query;
+  let list = db.users.filter((u) => u.role === 'specialist');
+  if (TYPES[type]) list = list.filter((u) => u.type === type);
+  if (format === 'online' || format === 'offline') list = list.filter((u) => u.formats.includes(format));
+  res.json({ specialists: list.map((u) => specialistCard(db, u)) });
+});
+
+api.get('/specialists/:id', (req, res) => {
+  const db = loadDb();
+  const spec = findSpecialist(db, req.params.id);
+  if (!spec) return notFound(res);
+  res.json({ specialist: { ...publicUser(spec), ...ratingOf(db, spec.id) } });
+});
+
+api.get('/specialists/:id/slots', (req, res) => {
+  const db = loadDb();
+  const spec = findSpecialist(db, req.params.id);
+  if (!spec) return notFound(res);
+  const now = Date.now();
+  const slots = db.slots
+    .filter((s) => s.specialistId === spec.id && s.status === 'free' && new Date(s.start).getTime() > now)
+    .sort((a, b) => new Date(a.start) - new Date(b.start))
+    .map(({ id, start, durationMin }) => ({ id, start, durationMin }));
+  res.json({ slots });
+});
+
+api.get('/specialists/:id/reviews', (req, res) => {
+  const db = loadDb();
+  const spec = findSpecialist(db, req.params.id);
+  if (!spec) return notFound(res);
+  const reviews = db.reviews
+    .filter((r) => r.specialistId === spec.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(({ rating, text, createdAt }) => ({ rating, text, createdAt }));
+  res.json({ reviews });
+});
