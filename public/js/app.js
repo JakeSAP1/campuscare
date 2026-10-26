@@ -3,6 +3,7 @@ import { esc, toast, TYPE_INFO } from './ui.js';
 import { state } from './state.js';
 import { renderLogin, renderRegister } from './views/auth.js';
 import { renderCatalog } from './views/catalog.js';
+import { renderSpecialist } from './views/specialist.js';
 
 function renderHome(container) {
   const cards = Object.entries(TYPE_INFO)
@@ -55,6 +56,7 @@ function renderHeader() {
 const routes = [
   { pattern: /^\/$/, view: renderHome },
   { pattern: /^\/catalog$/, view: renderCatalog },
+  { pattern: /^\/specialist\/([\w-]+)$/, view: renderSpecialist },
   { pattern: /^\/login$/, view: renderLogin },
   { pattern: /^\/register$/, view: renderRegister },
 ];
@@ -64,7 +66,7 @@ async function route() {
   const path = rawPath || '/';
   const params = new URLSearchParams(rawQuery);
   const app = document.getElementById('app');
-  const current = routes.find((r) => r.pattern.test(path));
+  const current = routes.map((r) => ({ route: r, match: path.match(r.pattern) })).find((r) => r.match);
 
   if (!current) {
     app.innerHTML = '<section class="card"><h2>Страница не найдена</h2><p><a href="#/">На главную</a></p></section>';
@@ -77,7 +79,7 @@ async function route() {
   }
 
   renderHeader();
-  await current.view(app, params);
+  await current.route.view(app, params, current.match[1]);
 }
 
 window.addEventListener('hashchange', route);

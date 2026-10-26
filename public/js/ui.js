@@ -27,6 +27,15 @@ export const plural = (count, [one, few, many]) => {
   return many;
 };
 
+export const fmtDate = (iso) =>
+  new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' });
+
+export const fmtTime = (iso) =>
+  new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+export const fmtDateTime = (iso) =>
+  new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
 export function toast(message, type = 'info') {
   const item = document.createElement('div');
   item.className = `toast toast--${type}`;
