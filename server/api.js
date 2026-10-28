@@ -169,3 +169,147 @@ api.get('/specialists/:id/reviews', (req, res) => {
     .map(({ rating, text, createdAt }) => ({ rating, text, createdAt }));
   res.json({ reviews });
 });
+
+/* --- записи на консультации --- */
+
+const requireRole = (role) => (req, res, next) => {
+  if (req.user.role !== role) return res.status(403).json({ error: 'Недоступно для вашей роли' });
+  next();
+};
+
+const notify = (db, userId, type, text) => {
+  db.notifications.push({
+    id: newId(),
+    userId,
+    type,
+    text,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+};
+
+const pad = (value) => String(value).padStart(2, '0');
+const fmtServer = (iso) => {
+  const date = new Date(iso);
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const bookingView = (db, booking, viewer) => {
+  const student = userById(db, booking.studentId);
+  const specialist = userById(db, booking.specialistId);
+  const review = db.reviews.find((r) => r.bookingId === booking.id);
+  const isStudent = viewer.id === booking.studentId;
+  const isSpecialist = viewer.id === booking.specialistId;
+  return {
+    id: booking.id,
+    start: booking.start,
+    durationMin: booking.durationMin,
+    format: booking.format,
+    status: booking.status,
+    createdAt: booking.createdAt,
+    cancelReason: booking.cancelReason || '',
+    specialist: { id: specialist.id, name: specialist.name, typeLabel: TYPES[specialist.type] },
+    student: { id: student.id, name: student.name },
+    ...(isStudent
+      ? { studentNote: booking.studentNote || '', canReview: booking.status === 'completed' && !review }
+      : {}),
+    ...(isSpecialist ? { questionnaire: booking.questionnaire, specNote: booking.specNote || '' } : {}),
+  };
+};
+
+const findBooking = (db, id) => db.bookings.find((b) => b.id === id);
+
+api.post('/bookings', requireAuth, requireRole('student'), (req, res) => {
+  const db = loadDb();
+  const { slotId, format, questionnaire } = req.body || {};
+
+  const slot = db.slots.find((s) => s.id === slotId);
+  if (!slot || slot.status !== 'free') return res.status(400).json({ error: 'Слот недоступен' });
+  if (new Date(slot.start).getTime() <= Date.now()) return res.status(400).json({ error: 'Время этого слота уже прошло' });
+
+  const specialist = userById(db, slot.specialistId);
+  if (!specialist.formats.includes(format)) return res.status(400).json({ error: 'Специалист не принимает в этом формате' });
+
+  const isFirst = !db.bookings.some((b) =>
+    b.studentId === req.user.id &&
+    b.specialistId === specialist.id &&
+    ['pending', 'confirmed', 'completed'].includes(b.status));
+
+  let filled = null;
+  if (isFirst) {
+    const q = questionnaire || {};
+    const course = String(q.course || '').trim();
+    const request = String(q.request || '').trim();
+    if (!course || !request) return res.status(400).json({ error: 'Перед первой консультацией заполните анкету: курс и запрос' });
+    filled = { course, request, experience: String(q.experience || '').trim(), notes: String(q.notes || '').trim() };
+  }
+
+  slot.status = 'booked';
+  const booking = {
+    id: newId(),
+    studentId: req.user.id,
+    specialistId: specialist.id,
+    slotId: slot.id,
+    start: slot.start,
+    durationMin: slot.durationMin,
+    format,
+    status: 'pending',
+    questionnaire: filled,
+    specNote: '',
+    studentNote: '',
+    cancelReason: '',
+    reminderSent: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  db.bookings.push(booking);
+
+  notify(db, specialist.id, 'booking_new', `Новая заявка на ${fmtServer(booking.start)} от ${req.user.name}`);
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
+
+api.get('/my/bookings', requireAuth, requireRole('student'), (req, res) => {
+  const db = loadDb();
+  const bookings = db.bookings
+    .filter((b) => b.studentId === req.user.id)
+    .sort((a, b) => new Date(b.start) - new Date(a.start))
+    .map((b) => bookingView(db, b, req.user));
+  res.json({ bookings });
+});
+
+api.post('/bookings/:id/confirm', requireAuth, (req, res) => {
+  const db = loadDb();
+  const booking = findBooking(db, req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (![booking.studentId, booking.specialistId].includes(req.user.id)) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (booking.status !== 'pending') return res.status(400).json({ error: 'Подтвердить можно только заявку, ожидающую подтверждения' });
+
+  booking.status = 'confirmed';
+  booking.updatedAt = new Date().toISOString();
+  const otherId = req.user.id === booking.studentId ? booking.specialistId : booking.studentId;
+  notify(db, otherId, 'booking_confirmed', req.user.id === booking.specialistId
+    ? `Консультация ${fmtServer(booking.start)} подтверждена`
+    : `${req.user.name} подтвердил(а) консультацию ${fmtServer(booking.start)}`);
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
+
+api.post('/bookings/:id/cancel', requireAuth, (req, res) => {
+  const db = loadDb();
+  const booking = findBooking(db, req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (![booking.studentId, booking.specialistId].includes(req.user.id)) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ error: 'Эту запись уже нельзя отменить' });
+
+  booking.status = 'cancelled';
+  booking.cancelReason = String((req.body || {}).reason || '').trim();
+  booking.updatedAt = new Date().toISOString();
+  const slot = db.slots.find((s) => s.id === booking.slotId);
+  if (slot) slot.status = 'free';
+
+  const otherId = req.user.id === booking.studentId ? booking.specialistId : booking.studentId;
+  notify(db, otherId, 'booking_cancelled', `Консультация ${fmtServer(booking.start)} отменена${booking.cancelReason ? `: ${booking.cancelReason}` : ''}`);
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
