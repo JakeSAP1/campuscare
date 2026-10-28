@@ -313,3 +313,80 @@ api.post('/bookings/:id/cancel', requireAuth, (req, res) => {
   saveDb();
   res.json({ booking: bookingView(db, booking, req.user) });
 });
+
+/* --- кабинет специалиста --- */
+
+api.get('/my/schedule', requireAuth, requireRole('specialist'), (req, res) => {
+  const db = loadDb();
+  const bookings = db.bookings
+    .filter((b) => b.specialistId === req.user.id)
+    .sort((a, b) => new Date(a.start) - new Date(b.start))
+    .map((b) => bookingView(db, b, req.user));
+  res.json({ bookings });
+});
+
+api.post('/bookings/:id/reschedule', requireAuth, requireRole('specialist'), (req, res) => {
+  const db = loadDb();
+  const booking = findBooking(db, req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ error: 'Эту запись нельзя перенести' });
+
+  const slot = db.slots.find((s) => s.id === (req.body || {}).slotId);
+  if (!slot || slot.status !== 'free' || new Date(slot.start).getTime() <= Date.now()) {
+    return res.status(400).json({ error: 'Выберите свободный будущий слот' });
+  }
+
+  const oldSlot = db.slots.find((s) => s.id === booking.slotId);
+  if (oldSlot) oldSlot.status = 'free';
+  slot.status = 'booked';
+  booking.slotId = slot.id;
+  booking.start = slot.start;
+  booking.durationMin = slot.durationMin;
+  booking.status = 'pending';
+  booking.updatedAt = new Date().toISOString();
+
+  notify(db, booking.studentId, 'booking_rescheduled', `Специалист предложил другое время: ${fmtServer(booking.start)} — подтвердите в кабинете`);
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
+
+api.post('/bookings/:id/complete', requireAuth, requireRole('specialist'), (req, res) => {
+  const db = loadDb();
+  const booking = findBooking(db, req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (booking.status !== 'confirmed') return res.status(400).json({ error: 'Провести можно только подтверждённую запись' });
+
+  booking.status = 'completed';
+  booking.updatedAt = new Date().toISOString();
+  notify(db, booking.studentId, 'booking_completed', `Консультация ${fmtServer(booking.start)} завершена`);
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
+
+api.post('/bookings/:id/spec-note', requireAuth, requireRole('specialist'), (req, res) => {
+  const db = loadDb();
+  const booking = findBooking(db, req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
+
+  booking.specNote = String((req.body || {}).text || '').trim();
+  booking.updatedAt = new Date().toISOString();
+  saveDb();
+  res.json({ booking: bookingView(db, booking, req.user) });
+});
+
+api.get('/my/clients', requireAuth, requireRole('specialist'), (req, res) => {
+  const db = loadDb();
+  const byStudent = new Map();
+  for (const booking of db.bookings.filter((b) => b.specialistId === req.user.id && b.status !== 'cancelled')) {
+    const entry = byStudent.get(booking.studentId)
+      || { id: booking.studentId, name: userById(db, booking.studentId).name, visits: 0, lastStart: null };
+    entry.visits += 1;
+    if (!entry.lastStart || new Date(booking.start) > new Date(entry.lastStart)) entry.lastStart = booking.start;
+    byStudent.set(booking.studentId, entry);
+  }
+  const clients = [...byStudent.values()].sort((a, b) => new Date(b.lastStart) - new Date(a.lastStart));
+  res.json({ clients });
+});
