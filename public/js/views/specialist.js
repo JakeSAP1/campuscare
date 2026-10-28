@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { esc, stars, plural, fmtDate, fmtTime, fmtDateTime, toast } from '../ui.js';
 import { state } from '../state.js';
+import { openBookingModal } from './booking.js';
 
 const FORMAT_LABELS = { online: 'Онлайн', offline: 'Очно' };
 
@@ -31,7 +32,7 @@ export async function renderSpecialist(container, params, id) {
   const slotRows = [...byDay].map(([day, daySlots]) => `
     <div class="slot-day">
       <h3>${esc(day)}</h3>
-      <div class="slot-chips">${daySlots.map((s) => `<button class="slot-chip" data-start="${s.start}">${fmtTime(s.start)}</button>`).join('')}</div>
+      <div class="slot-chips">${daySlots.map((s) => `<button class="slot-chip" data-id="${s.id}" data-start="${s.start}">${fmtTime(s.start)}</button>`).join('')}</div>
     </div>`).join('');
 
   container.innerHTML = `
@@ -81,6 +82,6 @@ export async function renderSpecialist(container, params, id) {
       toast('Запись доступна только студентам', 'error');
       return;
     }
-    toast('Оформление записи появится в ближайшем обновлении');
+    openBookingModal({ id: chip.dataset.id, start: chip.dataset.start }, specialist);
   });
 }

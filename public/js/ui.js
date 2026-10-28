@@ -36,6 +36,21 @@ export const fmtTime = (iso) =>
 export const fmtDateTime = (iso) =>
   new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+export function openModal(html) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">${html}</div>`;
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') close();
+  });
+  document.getElementById('modal-root').append(overlay);
+  return { overlay, close };
+}
+
 export function toast(message, type = 'info') {
   const item = document.createElement('div');
   item.className = `toast toast--${type}`;
