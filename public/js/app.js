@@ -4,6 +4,7 @@ import { state } from './state.js';
 import { renderLogin, renderRegister } from './views/auth.js';
 import { renderCatalog } from './views/catalog.js';
 import { renderSpecialist } from './views/specialist.js';
+import { renderCabinet } from './views/student.js';
 
 function renderHome(container) {
   const cards = Object.entries(TYPE_INFO)
@@ -34,7 +35,9 @@ function renderHeader() {
     return;
   }
 
-  nav.innerHTML = '<a href="#/" data-route="/">Главная</a><a href="#/catalog" data-route="/catalog">Каталог</a>';
+  const links = [['#/', 'Главная'], ['#/catalog', 'Каталог']];
+  if (state.me.role === 'student') links.push(['#/cabinet', 'Мои консультации']);
+  nav.innerHTML = links.map(([href, label]) => `<a href="${href}">${esc(label)}</a>`).join('');
   right.innerHTML = `
     <span class="user-chip">${esc(state.me.name)}</span>
     <button class="btn btn--ghost btn--sm" id="logout-btn">Выйти</button>`;
@@ -57,6 +60,7 @@ const routes = [
   { pattern: /^\/$/, view: renderHome },
   { pattern: /^\/catalog$/, view: renderCatalog },
   { pattern: /^\/specialist\/([\w-]+)$/, view: renderSpecialist },
+  { pattern: /^\/cabinet$/, view: renderCabinet, role: 'student' },
   { pattern: /^\/login$/, view: renderLogin },
   { pattern: /^\/register$/, view: renderRegister },
 ];
@@ -76,6 +80,17 @@ async function route() {
   if ((path === '/login' || path === '/register') && state.me) {
     location.hash = '#/';
     return;
+  }
+
+  if (current.route.role) {
+    if (!state.me) {
+      location.hash = '#/login';
+      return;
+    }
+    if (state.me.role !== current.route.role) {
+      location.hash = '#/';
+      return;
+    }
   }
 
   renderHeader();

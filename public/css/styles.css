@@ -684,6 +684,92 @@ main.container {
   margin-top: 6px;
 }
 
+/* --- кабинеты и записи --- */
+
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-title {
+  margin: 22px 0 12px;
+  font-size: 18px;
+}
+
+.booking-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+
+.booking-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.booking-card__when {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.booking-card__who {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.booking-card__who a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.booking-card__reason {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.booking-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.status--pending {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.status--confirmed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.status--completed {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.status--cancelled {
+  background: #eef0f5;
+  color: var(--muted);
+}
+
 #toast-root {
   position: fixed;
   right: 20px;
