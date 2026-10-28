@@ -36,6 +36,15 @@ export const fmtTime = (iso) =>
 export const fmtDateTime = (iso) =>
   new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+export const STATUS_INFO = {
+  pending: { label: 'Ожидает подтверждения', cls: 'status--pending' },
+  confirmed: { label: 'Подтверждена', cls: 'status--confirmed' },
+  completed: { label: 'Проведена', cls: 'status--completed' },
+  cancelled: { label: 'Отменена', cls: 'status--cancelled' },
+};
+
+export const FORMAT_LABELS = { online: 'Онлайн', offline: 'Очно' };
+
 export function openModal(html) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';

@@ -5,6 +5,7 @@ import { renderLogin, renderRegister } from './views/auth.js';
 import { renderCatalog } from './views/catalog.js';
 import { renderSpecialist } from './views/specialist.js';
 import { renderCabinet } from './views/student.js';
+import { renderSchedule } from './views/specialist-cab.js';
 
 function renderHome(container) {
   const cards = Object.entries(TYPE_INFO)
@@ -37,6 +38,7 @@ function renderHeader() {
 
   const links = [['#/', 'Главная'], ['#/catalog', 'Каталог']];
   if (state.me.role === 'student') links.push(['#/cabinet', 'Мои консультации']);
+  if (state.me.role === 'specialist') links.push(['#/schedule', 'Расписание']);
   nav.innerHTML = links.map(([href, label]) => `<a href="${href}">${esc(label)}</a>`).join('');
   right.innerHTML = `
     <span class="user-chip">${esc(state.me.name)}</span>
@@ -61,6 +63,7 @@ const routes = [
   { pattern: /^\/catalog$/, view: renderCatalog },
   { pattern: /^\/specialist\/([\w-]+)$/, view: renderSpecialist },
   { pattern: /^\/cabinet$/, view: renderCabinet, role: 'student' },
+  { pattern: /^\/schedule$/, view: renderSchedule, role: 'specialist' },
   { pattern: /^\/login$/, view: renderLogin },
   { pattern: /^\/register$/, view: renderRegister },
 ];

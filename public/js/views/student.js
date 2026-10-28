@@ -1,14 +1,5 @@
 import { api } from '../api.js';
-import { esc, fmtDate, fmtTime, toast } from '../ui.js';
-
-const STATUS = {
-  pending: { label: 'Ожидает подтверждения', cls: 'status--pending' },
-  confirmed: { label: 'Подтверждена', cls: 'status--confirmed' },
-  completed: { label: 'Проведена', cls: 'status--completed' },
-  cancelled: { label: 'Отменена', cls: 'status--cancelled' },
-};
-
-const FORMAT_LABELS = { online: 'Онлайн', offline: 'Очно' };
+import { esc, fmtDate, fmtTime, toast, STATUS_INFO, FORMAT_LABELS } from '../ui.js';
 
 const bookingCard = (booking, isUpcoming) => `
   <div class="booking-card" data-id="${booking.id}">
@@ -17,7 +8,7 @@ const bookingCard = (booking, isUpcoming) => `
         <div class="booking-card__when">${fmtDate(booking.start)}, ${fmtTime(booking.start)} · ${FORMAT_LABELS[booking.format]}</div>
         <div class="booking-card__who"><a href="#/specialist/${booking.specialist.id}">${esc(booking.specialist.name)}</a> · ${esc(booking.specialist.typeLabel)}</div>
       </div>
-      <span class="status ${STATUS[booking.status].cls}">${STATUS[booking.status].label}</span>
+      <span class="status ${STATUS_INFO[booking.status].cls}">${STATUS_INFO[booking.status].label}</span>
     </div>
     ${booking.status === 'cancelled' && booking.cancelReason ? `<p class="booking-card__reason">Причина: ${esc(booking.cancelReason)}</p>` : ''}
     <div class="booking-card__actions">
