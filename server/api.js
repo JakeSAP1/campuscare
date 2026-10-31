@@ -390,3 +390,33 @@ api.get('/my/clients', requireAuth, requireRole('specialist'), (req, res) => {
   const clients = [...byStudent.values()].sort((a, b) => new Date(b.lastStart) - new Date(a.lastStart));
   res.json({ clients });
 });
+
+/* --- отзывы --- */
+
+api.post('/reviews', requireAuth, requireRole('student'), (req, res) => {
+  const db = loadDb();
+  const { bookingId, rating, text } = req.body || {};
+
+  const booking = findBooking(db, bookingId);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (booking.studentId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (booking.status !== 'completed') return res.status(400).json({ error: 'Отзыв можно оставить только после проведённой консультации' });
+  if (db.reviews.some((r) => r.bookingId === booking.id)) return res.status(400).json({ error: 'Отзыв к этой консультации уже оставлен' });
+
+  const score = Number(rating);
+  if (!Number.isInteger(score) || score < 1 || score > 5) return res.status(400).json({ error: 'Оценка — целое число от 1 до 5' });
+
+  const review = {
+    id: newId(),
+    bookingId: booking.id,
+    specialistId: booking.specialistId,
+    studentId: req.user.id,
+    rating: score,
+    text: String(text || '').trim(),
+    createdAt: new Date().toISOString(),
+  };
+  db.reviews.push(review);
+  notify(db, booking.specialistId, 'review_new', `Новый отзыв: ${score} из 5 о ваших консультациях`);
+  saveDb();
+  res.json({ review: { rating: review.rating, text: review.text, createdAt: review.createdAt } });
+});
