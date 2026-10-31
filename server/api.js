@@ -109,6 +109,21 @@ api.post('/logout', requireAuth, (req, res) => {
 });
 
 api.get('/me', requireAuth, (req, res) => {
+  const db = loadDb();
+  const now = Date.now();
+  let changed = false;
+  for (const booking of db.bookings) {
+    if (booking.status !== 'confirmed' || booking.reminderSent) continue;
+    if (![booking.studentId, booking.specialistId].includes(req.user.id)) continue;
+    const start = new Date(booking.start).getTime();
+    if (start > now && start - now <= 24 * 60 * 60 * 1000) {
+      booking.reminderSent = true;
+      notify(db, booking.studentId, 'reminder', `Напоминание: консультация ${fmtServer(booking.start)} (${booking.format === 'online' ? 'онлайн' : 'очно'})`);
+      notify(db, booking.specialistId, 'reminder', `Напоминание: консультация с ${userById(db, booking.studentId).name} ${fmtServer(booking.start)}`);
+      changed = true;
+    }
+  }
+  if (changed) saveDb();
   res.json({ user: publicUser(req.user) });
 });
 
@@ -419,4 +434,24 @@ api.post('/reviews', requireAuth, requireRole('student'), (req, res) => {
   notify(db, booking.specialistId, 'review_new', `Новый отзыв: ${score} из 5 о ваших консультациях`);
   saveDb();
   res.json({ review: { rating: review.rating, text: review.text, createdAt: review.createdAt } });
+});
+
+/* --- уведомления --- */
+
+api.get('/notifications', requireAuth, (req, res) => {
+  const db = loadDb();
+  const list = db.notifications
+    .filter((n) => n.userId === req.user.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(({ id, type, text, read, createdAt }) => ({ id, type, text, read, createdAt }));
+  res.json({ notifications: list, unread: list.filter((n) => !n.read).length });
+});
+
+api.post('/notifications/read', requireAuth, (req, res) => {
+  const db = loadDb();
+  db.notifications.forEach((n) => {
+    if (n.userId === req.user.id) n.read = true;
+  });
+  saveDb();
+  res.json({ ok: true });
 });
