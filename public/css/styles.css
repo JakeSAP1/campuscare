@@ -684,6 +684,39 @@ main.container {
   margin-top: 6px;
 }
 
+/* --- отзыв --- */
+
+.star-picker {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.star-btn {
+  border: none;
+  background: none;
+  font-size: 26px;
+  line-height: 1;
+  color: #cfd5e3;
+  cursor: pointer;
+  padding: 2px;
+  transition: color 0.1s, transform 0.1s;
+}
+
+.star-btn:hover {
+  transform: scale(1.15);
+}
+
+.star-btn--on {
+  color: #e8a417;
+}
+
+.star-picker__label {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* --- кабинеты и записи --- */
 
 .page-head {

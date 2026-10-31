@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { esc, fmtDate, fmtTime, toast, STATUS_INFO, FORMAT_LABELS } from '../ui.js';
+import { openReviewModal } from './review.js';
 
 const bookingCard = (booking, isUpcoming) => `
   <div class="booking-card" data-id="${booking.id}">
@@ -14,6 +15,7 @@ const bookingCard = (booking, isUpcoming) => `
     <div class="booking-card__actions">
       ${booking.status === 'pending' ? '<button class="btn btn--sm" data-action="confirm">Подтвердить</button>' : ''}
       ${isUpcoming ? '<button class="btn btn--ghost btn--sm" data-action="cancel">Отменить</button>' : ''}
+      ${booking.canReview ? '<button class="btn btn--sm" data-action="review">Оставить отзыв</button>' : ''}
       ${booking.status === 'completed' ? `<a class="btn btn--ghost btn--sm" href="#/specialist/${booking.specialist.id}">Записаться снова</a>` : ''}
     </div>
   </div>`;
@@ -54,6 +56,13 @@ export async function renderCabinet(container) {
     const btn = event.target.closest('[data-action]');
     if (!btn) return;
     const card = btn.closest('.booking-card');
+
+    if (btn.dataset.action === 'review') {
+      const booking = [...upcoming, ...history].find((b) => b.id === card.dataset.id);
+      openReviewModal(booking, () => renderCabinet(container));
+      return;
+    }
+
     try {
       await api(`/bookings/${card.dataset.id}/${btn.dataset.action}`, { method: 'POST', body: {} });
       toast(btn.dataset.action === 'confirm' ? 'Запись подтверждена' : 'Запись отменена', 'success');
