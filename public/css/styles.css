@@ -105,6 +105,94 @@ main.container {
   white-space: nowrap;
 }
 
+/* --- уведомления --- */
+
+.bell {
+  position: relative;
+}
+
+.bell__btn {
+  position: relative;
+  border: none;
+  background: none;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.bell__btn:hover {
+  background: var(--primary-soft);
+}
+
+.bell__badge {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bell__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 340px;
+  max-height: 380px;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  z-index: 30;
+}
+
+.bell__item {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bell__item:last-child {
+  border-bottom: none;
+}
+
+.bell__item--unread {
+  background: var(--primary-soft);
+}
+
+.bell__text {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.bell__item--unread .bell__text {
+  font-weight: 600;
+}
+
+.bell__date {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.bell__empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 /* --- кнопки --- */
 
 .btn {

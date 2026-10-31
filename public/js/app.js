@@ -1,11 +1,13 @@
 import { api, getToken, setToken } from './api.js';
-import { esc, toast, TYPE_INFO } from './ui.js';
+import { esc, toast, TYPE_INFO, fmtDateTime } from './ui.js';
 import { state } from './state.js';
 import { renderLogin, renderRegister } from './views/auth.js';
 import { renderCatalog } from './views/catalog.js';
 import { renderSpecialist } from './views/specialist.js';
 import { renderCabinet } from './views/student.js';
 import { renderSchedule } from './views/specialist-cab.js';
+
+state.notifications = [];
 
 function renderHome(container) {
   const cards = Object.entries(TYPE_INFO)
@@ -41,6 +43,10 @@ function renderHeader() {
   if (state.me.role === 'specialist') links.push(['#/schedule', 'Расписание']);
   nav.innerHTML = links.map(([href, label]) => `<a href="${href}">${esc(label)}</a>`).join('');
   right.innerHTML = `
+    <div class="bell">
+      <button class="bell__btn" id="bell-btn" aria-label="Уведомления">🔔<span class="bell__badge" id="bell-badge" hidden></span></button>
+      <div class="bell__panel" id="bell-panel" hidden></div>
+    </div>
     <span class="user-chip">${esc(state.me.name)}</span>
     <button class="btn btn--ghost btn--sm" id="logout-btn">Выйти</button>`;
 
@@ -56,6 +62,54 @@ function renderHeader() {
     route();
     toast('Вы вышли из аккаунта');
   });
+
+  const bellBtn = right.querySelector('#bell-btn');
+  const panel = right.querySelector('#bell-panel');
+  bellBtn.addEventListener('click', async () => {
+    if (panel.hidden) {
+      panel.hidden = false;
+      panel.innerHTML = state.notifications.length
+        ? state.notifications.map((n) => `
+          <div class="bell__item ${n.read ? '' : 'bell__item--unread'}">
+            <p class="bell__text">${esc(n.text)}</p>
+            <span class="bell__date">${fmtDateTime(n.createdAt)}</span>
+          </div>`).join('')
+        : '<p class="bell__empty">Уведомлений пока нет</p>';
+      if (state.unread > 0) {
+        try {
+          await api('/notifications/read', { method: 'POST', body: {} });
+          state.unread = 0;
+          refreshBadge();
+        } catch {
+          // бейдж обновится на следующем опросе
+        }
+      }
+    } else {
+      panel.hidden = true;
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.bell')) panel.hidden = true;
+  });
+}
+
+function refreshBadge() {
+  const badge = document.getElementById('bell-badge');
+  if (!badge) return;
+  badge.hidden = !state.unread;
+  badge.textContent = state.unread > 9 ? '9+' : state.unread;
+}
+
+async function refreshBell() {
+  if (!state.me) return;
+  try {
+    const { notifications, unread } = await api('/notifications');
+    state.notifications = notifications;
+    state.unread = unread;
+    refreshBadge();
+  } catch {
+    // сеть моргнула — опрос повторится
+  }
 }
 
 const routes = [
@@ -97,6 +151,7 @@ async function route() {
   }
 
   renderHeader();
+  refreshBell();
   await current.route.view(app, params, current.match[1]);
 }
 
@@ -112,4 +167,5 @@ window.addEventListener('hashchange', route);
     }
   }
   route();
+  setInterval(refreshBell, 30000);
 })();
