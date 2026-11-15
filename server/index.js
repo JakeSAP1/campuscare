@@ -1,12 +1,9 @@
 import express from 'express';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadDb } from './db.js';
 import { api } from './api.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-
-loadDb();
 
 const app = express();
 app.use(express.json());

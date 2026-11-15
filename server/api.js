@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loadDb, saveDb, newId } from './db.js';
+import { db } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 
 export const TYPES = {
@@ -8,8 +8,23 @@ export const TYPES = {
   tutor: 'Тьютор',
 };
 
-export const userById = (db, id) => db.users.find((u) => u.id === id);
-const findByEmail = (db, email) => db.users.find((u) => u.email.toLowerCase() === String(email).trim().toLowerCase());
+const rowUser = (row) => row && ({
+  id: row.id,
+  role: row.role,
+  name: row.name,
+  email: row.email,
+  passHash: row.pass_hash,
+  type: row.type,
+  specialization: row.specialization,
+  bio: row.bio,
+  formats: JSON.parse(row.formats || '[]'),
+  workFrom: row.work_from,
+  workTo: row.work_to,
+  createdAt: row.created_at,
+});
+
+const userById = (id) => rowUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+const findByEmail = (email) => rowUser(db.prepare('SELECT * FROM users WHERE lower(email) = lower(?)').get(String(email).trim()));
 
 export function publicUser(user) {
   if (!user) return null;
@@ -28,12 +43,11 @@ export function publicUser(user) {
 }
 
 function currentUser(req) {
-  const db = loadDb();
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) return null;
   const token = header.slice(7);
-  const session = db.sessions.find((s) => s.token === token);
-  return session ? userById(db, session.userId) : null;
+  const session = db.prepare('SELECT user_id FROM sessions WHERE token = ?').get(token);
+  return session ? userById(session.user_id) : null;
 }
 
 const requireAuth = (req, res, next) => {
@@ -43,26 +57,96 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-function startSession(db, user) {
-  const token = newId() + newId();
-  db.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() });
+const requireRole = (role) => (req, res, next) => {
+  if (req.user.role !== role) return res.status(403).json({ error: 'Недоступно для вашей роли' });
+  next();
+};
+
+function startSession(userId) {
+  const token = crypto.randomUUID() + crypto.randomUUID();
+  db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)')
+    .run(token, userId, new Date().toISOString());
   return token;
 }
 
+const notify = (userId, type, text) => {
+  db.prepare('INSERT INTO notifications (id, user_id, type, text, read, created_at) VALUES (?, ?, ?, ?, 0, ?)')
+    .run(crypto.randomUUID(), userId, type, text, new Date().toISOString());
+};
+
+const pad = (value) => String(value).padStart(2, '0');
+const fmtServer = (isoDate) => {
+  const date = new Date(isoDate);
+  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const BOOKING_SELECT = `
+  SELECT b.*, su.name AS student_name, pu.name AS specialist_name, pu.type AS specialist_type,
+    EXISTS(SELECT 1 FROM reviews r WHERE r.booking_id = b.id) AS has_review
+  FROM bookings b
+  JOIN users su ON su.id = b.student_id
+  JOIN users pu ON pu.id = b.specialist_id
+`;
+
+const rowBooking = (row) => row && ({
+  id: row.id,
+  studentId: row.student_id,
+  specialistId: row.specialist_id,
+  slotId: row.slot_id,
+  start: row.start,
+  durationMin: row.duration_min,
+  format: row.format,
+  status: row.status,
+  questionnaire: row.questionnaire ? JSON.parse(row.questionnaire) : null,
+  specNote: row.spec_note,
+  studentNote: row.student_note,
+  cancelReason: row.cancel_reason,
+  reminderSent: !!row.reminder_sent,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  studentName: row.student_name,
+  specialistName: row.specialist_name,
+  specialistType: row.specialist_type,
+  hasReview: !!row.has_review,
+});
+
+const getBooking = (id) => rowBooking(db.prepare(`${BOOKING_SELECT} WHERE b.id = ?`).get(id));
+
+const bookingView = (booking, viewer) => {
+  const isStudent = viewer.id === booking.studentId;
+  const isSpecialist = viewer.id === booking.specialistId;
+  return {
+    id: booking.id,
+    start: booking.start,
+    durationMin: booking.durationMin,
+    format: booking.format,
+    status: booking.status,
+    createdAt: booking.createdAt,
+    cancelReason: booking.cancelReason,
+    specialist: { id: booking.specialistId, name: booking.specialistName, typeLabel: TYPES[booking.specialistType] },
+    student: { id: booking.studentId, name: booking.studentName },
+    ...(isStudent
+      ? { studentNote: booking.studentNote, canReview: booking.status === 'completed' && !booking.hasReview }
+      : {}),
+    ...(isSpecialist ? { questionnaire: booking.questionnaire, specNote: booking.specNote } : {}),
+  };
+};
+
 export const api = Router();
 
+/* --- авторизация --- */
+
 api.post('/register', (req, res) => {
-  const db = loadDb();
   const { role, name, email, password, specialist } = req.body || {};
 
   if (!['student', 'specialist'].includes(role)) return res.status(400).json({ error: 'Выберите роль' });
   if (!name || !String(name).trim()) return res.status(400).json({ error: 'Укажите имя' });
   if (!email || !String(email).includes('@')) return res.status(400).json({ error: 'Укажите корректный e-mail' });
   if (!password || String(password).length < 6) return res.status(400).json({ error: 'Пароль должен быть не короче 6 символов' });
-  if (findByEmail(db, email)) return res.status(400).json({ error: 'Пользователь с таким e-mail уже зарегистрирован' });
+  if (findByEmail(email)) return res.status(400).json({ error: 'Пользователь с таким e-mail уже зарегистрирован' });
 
   const user = {
-    id: newId(),
+    id: crypto.randomUUID(),
     role,
     name: String(name).trim(),
     email: String(email).trim().toLowerCase(),
@@ -83,172 +167,135 @@ api.post('/register', (req, res) => {
     user.workTo = Math.min(21, Math.max(Number(s.workTo) || 18, workFrom + 1));
   }
 
-  db.users.push(user);
-  const token = startSession(db, user);
-  saveDb();
+  db.prepare(`
+    INSERT INTO users (id, role, name, email, pass_hash, type, specialization, bio, formats, work_from, work_to, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(
+      user.id, user.role, user.name, user.email, user.passHash,
+      user.type ?? null, user.specialization ?? '', user.bio ?? '',
+      JSON.stringify(user.formats ?? ['online']), user.workFrom ?? 10, user.workTo ?? 18, user.createdAt,
+    );
+
+  const token = startSession(user.id);
   res.json({ token, user: publicUser(user) });
 });
 
 api.post('/login', (req, res) => {
-  const db = loadDb();
   const { email, password } = req.body || {};
-  const user = findByEmail(db, email || '');
+  const user = findByEmail(email || '');
   if (!user || !verifyPassword(String(password || ''), user.passHash)) {
     return res.status(401).json({ error: 'Неверный e-mail или пароль' });
   }
-  const token = startSession(db, user);
-  saveDb();
+  const token = startSession(user.id);
   res.json({ token, user: publicUser(user) });
 });
 
 api.post('/logout', requireAuth, (req, res) => {
-  const db = loadDb();
-  db.sessions = db.sessions.filter((s) => s.token !== req.headers.authorization.slice(7));
-  saveDb();
+  db.prepare('DELETE FROM sessions WHERE token = ?').run(req.headers.authorization.slice(7));
   res.json({ ok: true });
 });
 
 api.get('/me', requireAuth, (req, res) => {
-  const db = loadDb();
   const now = Date.now();
-  let changed = false;
-  for (const booking of db.bookings) {
-    if (booking.status !== 'confirmed' || booking.reminderSent) continue;
-    if (![booking.studentId, booking.specialistId].includes(req.user.id)) continue;
-    const start = new Date(booking.start).getTime();
-    if (start > now && start - now <= 24 * 60 * 60 * 1000) {
-      booking.reminderSent = true;
-      notify(db, booking.studentId, 'reminder', `Напоминание: консультация ${fmtServer(booking.start)} (${booking.format === 'online' ? 'онлайн' : 'очно'})`);
-      notify(db, booking.specialistId, 'reminder', `Напоминание: консультация с ${userById(db, booking.studentId).name} ${fmtServer(booking.start)}`);
-      changed = true;
-    }
+  const due = db.prepare(`
+    SELECT * FROM bookings
+    WHERE status = 'confirmed' AND reminder_sent = 0 AND start > ? AND start <= ?`)
+    .all(new Date(now).toISOString(), new Date(now + 24 * 60 * 60 * 1000).toISOString());
+
+  const markReminded = db.prepare('UPDATE bookings SET reminder_sent = 1 WHERE id = ?');
+  for (const row of due) {
+    if (![row.student_id, row.specialist_id].includes(req.user.id)) continue;
+    markReminded.run(row.id);
+    notify(row.student_id, 'reminder', `Напоминание: консультация ${fmtServer(row.start)} (${row.format === 'online' ? 'онлайн' : 'очно'})`);
+    notify(row.specialist_id, 'reminder', `Напоминание: консультация с ${userById(row.student_id).name} ${fmtServer(row.start)}`);
   }
-  if (changed) saveDb();
+
   res.json({ user: publicUser(req.user) });
 });
 
-const ratingOf = (db, specialistId) => {
-  const list = db.reviews.filter((r) => r.specialistId === specialistId);
-  const avg = list.length ? list.reduce((sum, r) => sum + r.rating, 0) / list.length : 0;
-  return { rating: Math.round(avg * 10) / 10, reviewsCount: list.length };
-};
+/* --- каталог --- */
 
-const specialistCard = (db, user) => ({
-  id: user.id,
-  name: user.name,
-  type: user.type,
-  typeLabel: TYPES[user.type],
-  specialization: user.specialization,
-  formats: user.formats,
-  ...ratingOf(db, user.id),
+const SPECIALIST_SELECT = `
+  SELECT u.*,
+    (SELECT ROUND(COALESCE(AVG(r.rating), 0) * 10) / 10 FROM reviews r WHERE r.specialist_id = u.id) AS rating,
+    (SELECT COUNT(*) FROM reviews r WHERE r.specialist_id = u.id) AS reviews_count
+  FROM users u
+  WHERE u.role = 'specialist'
+`;
+
+const specialistCard = (row) => ({
+  id: row.id,
+  name: row.name,
+  type: row.type,
+  typeLabel: TYPES[row.type],
+  specialization: row.specialization,
+  formats: JSON.parse(row.formats || '[]'),
+  rating: row.rating,
+  reviewsCount: row.reviews_count,
 });
 
-const findSpecialist = (db, id) => db.users.find((u) => u.role === 'specialist' && u.id === id);
+const findSpecialist = (id) => db.prepare(`${SPECIALIST_SELECT} AND u.id = ?`).get(id);
 const notFound = (res) => res.status(404).json({ error: 'Специалист не найден' });
 
 api.get('/specialists', (req, res) => {
-  const db = loadDb();
   const { type, format } = req.query;
-  let list = db.users.filter((u) => u.role === 'specialist');
-  if (TYPES[type]) list = list.filter((u) => u.type === type);
-  if (format === 'online' || format === 'offline') list = list.filter((u) => u.formats.includes(format));
-  res.json({ specialists: list.map((u) => specialistCard(db, u)) });
+  let sql = SPECIALIST_SELECT;
+  const params = [];
+  if (TYPES[type]) {
+    sql += ' AND u.type = ?';
+    params.push(type);
+  }
+  if (format === 'online' || format === 'offline') {
+    sql += ' AND u.formats LIKE ?';
+    params.push(`%"${format}"%`);
+  }
+  res.json({ specialists: db.prepare(sql).all(...params).map(specialistCard) });
 });
 
 api.get('/specialists/:id', (req, res) => {
-  const db = loadDb();
-  const spec = findSpecialist(db, req.params.id);
-  if (!spec) return notFound(res);
-  res.json({ specialist: { ...publicUser(spec), ...ratingOf(db, spec.id) } });
+  const row = findSpecialist(req.params.id);
+  if (!row) return notFound(res);
+  res.json({ specialist: { ...publicUser(rowUser(row)), rating: row.rating, reviewsCount: row.reviews_count } });
 });
 
 api.get('/specialists/:id/slots', (req, res) => {
-  const db = loadDb();
-  const spec = findSpecialist(db, req.params.id);
-  if (!spec) return notFound(res);
-  const now = Date.now();
-  const slots = db.slots
-    .filter((s) => s.specialistId === spec.id && s.status === 'free' && new Date(s.start).getTime() > now)
-    .sort((a, b) => new Date(a.start) - new Date(b.start))
-    .map(({ id, start, durationMin }) => ({ id, start, durationMin }));
+  const row = findSpecialist(req.params.id);
+  if (!row) return notFound(res);
+  const slots = db.prepare(`
+    SELECT id, start, duration_min FROM slots
+    WHERE specialist_id = ? AND status = 'free' AND start > ?
+    ORDER BY start`)
+    .all(row.id, new Date().toISOString())
+    .map(({ id, start, duration_min }) => ({ id, start, durationMin: duration_min }));
   res.json({ slots });
 });
 
 api.get('/specialists/:id/reviews', (req, res) => {
-  const db = loadDb();
-  const spec = findSpecialist(db, req.params.id);
-  if (!spec) return notFound(res);
-  const reviews = db.reviews
-    .filter((r) => r.specialistId === spec.id)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .map(({ rating, text, createdAt }) => ({ rating, text, createdAt }));
+  const row = findSpecialist(req.params.id);
+  if (!row) return notFound(res);
+  const reviews = db.prepare(`
+    SELECT rating, text, created_at FROM reviews WHERE specialist_id = ? ORDER BY created_at DESC`)
+    .all(row.id)
+    .map(({ rating, text, created_at }) => ({ rating, text, createdAt: created_at }));
   res.json({ reviews });
 });
 
 /* --- записи на консультации --- */
 
-const requireRole = (role) => (req, res, next) => {
-  if (req.user.role !== role) return res.status(403).json({ error: 'Недоступно для вашей роли' });
-  next();
-};
-
-const notify = (db, userId, type, text) => {
-  db.notifications.push({
-    id: newId(),
-    userId,
-    type,
-    text,
-    read: false,
-    createdAt: new Date().toISOString(),
-  });
-};
-
-const pad = (value) => String(value).padStart(2, '0');
-const fmtServer = (iso) => {
-  const date = new Date(iso);
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-const bookingView = (db, booking, viewer) => {
-  const student = userById(db, booking.studentId);
-  const specialist = userById(db, booking.specialistId);
-  const review = db.reviews.find((r) => r.bookingId === booking.id);
-  const isStudent = viewer.id === booking.studentId;
-  const isSpecialist = viewer.id === booking.specialistId;
-  return {
-    id: booking.id,
-    start: booking.start,
-    durationMin: booking.durationMin,
-    format: booking.format,
-    status: booking.status,
-    createdAt: booking.createdAt,
-    cancelReason: booking.cancelReason || '',
-    specialist: { id: specialist.id, name: specialist.name, typeLabel: TYPES[specialist.type] },
-    student: { id: student.id, name: student.name },
-    ...(isStudent
-      ? { studentNote: booking.studentNote || '', canReview: booking.status === 'completed' && !review }
-      : {}),
-    ...(isSpecialist ? { questionnaire: booking.questionnaire, specNote: booking.specNote || '' } : {}),
-  };
-};
-
-const findBooking = (db, id) => db.bookings.find((b) => b.id === id);
-
 api.post('/bookings', requireAuth, requireRole('student'), (req, res) => {
-  const db = loadDb();
   const { slotId, format, questionnaire } = req.body || {};
 
-  const slot = db.slots.find((s) => s.id === slotId);
+  const slot = db.prepare('SELECT * FROM slots WHERE id = ?').get(slotId);
   if (!slot || slot.status !== 'free') return res.status(400).json({ error: 'Слот недоступен' });
   if (new Date(slot.start).getTime() <= Date.now()) return res.status(400).json({ error: 'Время этого слота уже прошло' });
 
-  const specialist = userById(db, slot.specialistId);
+  const specialist = userById(slot.specialist_id);
   if (!specialist.formats.includes(format)) return res.status(400).json({ error: 'Специалист не принимает в этом формате' });
 
-  const isFirst = !db.bookings.some((b) =>
-    b.studentId === req.user.id &&
-    b.specialistId === specialist.id &&
-    ['pending', 'confirmed', 'completed'].includes(b.status));
+  const isFirst = db.prepare(`
+    SELECT COUNT(*) AS n FROM bookings
+    WHERE student_id = ? AND specialist_id = ? AND status IN ('pending', 'confirmed', 'completed')`)
+    .get(req.user.id, specialist.id).n === 0;
 
   let filled = null;
   if (isFirst) {
@@ -259,199 +306,161 @@ api.post('/bookings', requireAuth, requireRole('student'), (req, res) => {
     filled = { course, request, experience: String(q.experience || '').trim(), notes: String(q.notes || '').trim() };
   }
 
-  slot.status = 'booked';
-  const booking = {
-    id: newId(),
-    studentId: req.user.id,
-    specialistId: specialist.id,
-    slotId: slot.id,
-    start: slot.start,
-    durationMin: slot.durationMin,
-    format,
-    status: 'pending',
-    questionnaire: filled,
-    specNote: '',
-    studentNote: '',
-    cancelReason: '',
-    reminderSent: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  db.bookings.push(booking);
+  const bookingId = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO bookings (id, student_id, specialist_id, slot_id, start, duration_min, format, status,
+      questionnaire, spec_note, student_note, cancel_reason, reminder_sent, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, '', '', '', 0, ?, ?)`)
+    .run(bookingId, req.user.id, specialist.id, slot.id, slot.start, slot.duration_min, format,
+      filled ? JSON.stringify(filled) : null, nowIso, nowIso);
+  db.prepare(`UPDATE slots SET status = 'booked' WHERE id = ?`).run(slot.id);
 
-  notify(db, specialist.id, 'booking_new', `Новая заявка на ${fmtServer(booking.start)} от ${req.user.name}`);
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  notify(specialist.id, 'booking_new', `Новая заявка на ${fmtServer(slot.start)} от ${req.user.name}`);
+  res.json({ booking: bookingView(getBooking(bookingId), req.user) });
 });
 
 api.get('/my/bookings', requireAuth, requireRole('student'), (req, res) => {
-  const db = loadDb();
-  const bookings = db.bookings
-    .filter((b) => b.studentId === req.user.id)
-    .sort((a, b) => new Date(b.start) - new Date(a.start))
-    .map((b) => bookingView(db, b, req.user));
+  const bookings = db.prepare(`${BOOKING_SELECT} WHERE b.student_id = ? ORDER BY b.start DESC`)
+    .all(req.user.id)
+    .map((row) => bookingView(rowBooking(row), req.user));
   res.json({ bookings });
 });
 
 api.post('/bookings/:id/confirm', requireAuth, (req, res) => {
-  const db = loadDb();
-  const booking = findBooking(db, req.params.id);
+  const booking = getBooking(req.params.id);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (![booking.studentId, booking.specialistId].includes(req.user.id)) return res.status(403).json({ error: 'Это не ваша запись' });
   if (booking.status !== 'pending') return res.status(400).json({ error: 'Подтвердить можно только заявку, ожидающую подтверждения' });
 
-  booking.status = 'confirmed';
-  booking.updatedAt = new Date().toISOString();
+  db.prepare(`UPDATE bookings SET status = 'confirmed', updated_at = ? WHERE id = ?`)
+    .run(new Date().toISOString(), booking.id);
+
   const otherId = req.user.id === booking.studentId ? booking.specialistId : booking.studentId;
-  notify(db, otherId, 'booking_confirmed', req.user.id === booking.specialistId
+  notify(otherId, 'booking_confirmed', req.user.id === booking.specialistId
     ? `Консультация ${fmtServer(booking.start)} подтверждена`
     : `${req.user.name} подтвердил(а) консультацию ${fmtServer(booking.start)}`);
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  res.json({ booking: bookingView(getBooking(booking.id), req.user) });
 });
 
 api.post('/bookings/:id/cancel', requireAuth, (req, res) => {
-  const db = loadDb();
-  const booking = findBooking(db, req.params.id);
+  const booking = getBooking(req.params.id);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (![booking.studentId, booking.specialistId].includes(req.user.id)) return res.status(403).json({ error: 'Это не ваша запись' });
   if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ error: 'Эту запись уже нельзя отменить' });
 
-  booking.status = 'cancelled';
-  booking.cancelReason = String((req.body || {}).reason || '').trim();
-  booking.updatedAt = new Date().toISOString();
-  const slot = db.slots.find((s) => s.id === booking.slotId);
-  if (slot) slot.status = 'free';
+  const reason = String((req.body || {}).reason || '').trim();
+  db.prepare(`UPDATE bookings SET status = 'cancelled', cancel_reason = ?, updated_at = ? WHERE id = ?`)
+    .run(reason, new Date().toISOString(), booking.id);
+  if (booking.slotId) {
+    db.prepare(`UPDATE slots SET status = 'free' WHERE id = ?`).run(booking.slotId);
+  }
 
   const otherId = req.user.id === booking.studentId ? booking.specialistId : booking.studentId;
-  notify(db, otherId, 'booking_cancelled', `Консультация ${fmtServer(booking.start)} отменена${booking.cancelReason ? `: ${booking.cancelReason}` : ''}`);
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  notify(otherId, 'booking_cancelled', `Консультация ${fmtServer(booking.start)} отменена${reason ? `: ${reason}` : ''}`);
+  res.json({ booking: bookingView(getBooking(booking.id), req.user) });
 });
 
 /* --- кабинет специалиста --- */
 
 api.get('/my/schedule', requireAuth, requireRole('specialist'), (req, res) => {
-  const db = loadDb();
-  const bookings = db.bookings
-    .filter((b) => b.specialistId === req.user.id)
-    .sort((a, b) => new Date(a.start) - new Date(b.start))
-    .map((b) => bookingView(db, b, req.user));
+  const bookings = db.prepare(`${BOOKING_SELECT} WHERE b.specialist_id = ? ORDER BY b.start ASC`)
+    .all(req.user.id)
+    .map((row) => bookingView(rowBooking(row), req.user));
   res.json({ bookings });
 });
 
 api.post('/bookings/:id/reschedule', requireAuth, requireRole('specialist'), (req, res) => {
-  const db = loadDb();
-  const booking = findBooking(db, req.params.id);
+  const booking = getBooking(req.params.id);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
   if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ error: 'Эту запись нельзя перенести' });
 
-  const slot = db.slots.find((s) => s.id === (req.body || {}).slotId);
+  const slot = db.prepare('SELECT * FROM slots WHERE id = ?').get((req.body || {}).slotId);
   if (!slot || slot.status !== 'free' || new Date(slot.start).getTime() <= Date.now()) {
     return res.status(400).json({ error: 'Выберите свободный будущий слот' });
   }
 
-  const oldSlot = db.slots.find((s) => s.id === booking.slotId);
-  if (oldSlot) oldSlot.status = 'free';
-  slot.status = 'booked';
-  booking.slotId = slot.id;
-  booking.start = slot.start;
-  booking.durationMin = slot.durationMin;
-  booking.status = 'pending';
-  booking.updatedAt = new Date().toISOString();
+  const nowIso = new Date().toISOString();
+  if (booking.slotId) {
+    db.prepare(`UPDATE slots SET status = 'free' WHERE id = ?`).run(booking.slotId);
+  }
+  db.prepare(`UPDATE slots SET status = 'booked' WHERE id = ?`).run(slot.id);
+  db.prepare(`
+    UPDATE bookings SET slot_id = ?, start = ?, duration_min = ?, status = 'pending', updated_at = ? WHERE id = ?`)
+    .run(slot.id, slot.start, slot.duration_min, nowIso, booking.id);
 
-  notify(db, booking.studentId, 'booking_rescheduled', `Специалист предложил другое время: ${fmtServer(booking.start)} — подтвердите в кабинете`);
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  notify(booking.studentId, 'booking_rescheduled', `Специалист предложил другое время: ${fmtServer(slot.start)} — подтвердите в кабинете`);
+  res.json({ booking: bookingView(getBooking(booking.id), req.user) });
 });
 
 api.post('/bookings/:id/complete', requireAuth, requireRole('specialist'), (req, res) => {
-  const db = loadDb();
-  const booking = findBooking(db, req.params.id);
+  const booking = getBooking(req.params.id);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
   if (booking.status !== 'confirmed') return res.status(400).json({ error: 'Провести можно только подтверждённую запись' });
 
-  booking.status = 'completed';
-  booking.updatedAt = new Date().toISOString();
-  notify(db, booking.studentId, 'booking_completed', `Консультация ${fmtServer(booking.start)} завершена`);
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  db.prepare(`UPDATE bookings SET status = 'completed', updated_at = ? WHERE id = ?`)
+    .run(new Date().toISOString(), booking.id);
+  notify(booking.studentId, 'booking_completed', `Консультация ${fmtServer(booking.start)} завершена`);
+  res.json({ booking: bookingView(getBooking(booking.id), req.user) });
 });
 
 api.post('/bookings/:id/spec-note', requireAuth, requireRole('specialist'), (req, res) => {
-  const db = loadDb();
-  const booking = findBooking(db, req.params.id);
+  const booking = getBooking(req.params.id);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (booking.specialistId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
 
-  booking.specNote = String((req.body || {}).text || '').trim();
-  booking.updatedAt = new Date().toISOString();
-  saveDb();
-  res.json({ booking: bookingView(db, booking, req.user) });
+  db.prepare(`UPDATE bookings SET spec_note = ?, updated_at = ? WHERE id = ?`)
+    .run(String((req.body || {}).text || '').trim(), new Date().toISOString(), booking.id);
+  res.json({ booking: bookingView(getBooking(booking.id), req.user) });
 });
 
 api.get('/my/clients', requireAuth, requireRole('specialist'), (req, res) => {
-  const db = loadDb();
-  const byStudent = new Map();
-  for (const booking of db.bookings.filter((b) => b.specialistId === req.user.id && b.status !== 'cancelled')) {
-    const entry = byStudent.get(booking.studentId)
-      || { id: booking.studentId, name: userById(db, booking.studentId).name, visits: 0, lastStart: null };
-    entry.visits += 1;
-    if (!entry.lastStart || new Date(booking.start) > new Date(entry.lastStart)) entry.lastStart = booking.start;
-    byStudent.set(booking.studentId, entry);
-  }
-  const clients = [...byStudent.values()].sort((a, b) => new Date(b.lastStart) - new Date(a.lastStart));
+  const clients = db.prepare(`
+    SELECT b.student_id, u.name, COUNT(*) AS visits, MAX(b.start) AS last_start
+    FROM bookings b JOIN users u ON u.id = b.student_id
+    WHERE b.specialist_id = ? AND b.status != 'cancelled'
+    GROUP BY b.student_id ORDER BY last_start DESC`)
+    .all(req.user.id)
+    .map(({ student_id, name, visits, last_start }) => ({ id: student_id, name, visits, lastStart: last_start }));
   res.json({ clients });
 });
 
 /* --- отзывы --- */
 
 api.post('/reviews', requireAuth, requireRole('student'), (req, res) => {
-  const db = loadDb();
   const { bookingId, rating, text } = req.body || {};
 
-  const booking = findBooking(db, bookingId);
+  const booking = getBooking(bookingId);
   if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
   if (booking.studentId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
   if (booking.status !== 'completed') return res.status(400).json({ error: 'Отзыв можно оставить только после проведённой консультации' });
-  if (db.reviews.some((r) => r.bookingId === booking.id)) return res.status(400).json({ error: 'Отзыв к этой консультации уже оставлен' });
+  if (booking.hasReview) return res.status(400).json({ error: 'Отзыв к этой консультации уже оставлен' });
 
   const score = Number(rating);
   if (!Number.isInteger(score) || score < 1 || score > 5) return res.status(400).json({ error: 'Оценка — целое число от 1 до 5' });
 
-  const review = {
-    id: newId(),
-    bookingId: booking.id,
-    specialistId: booking.specialistId,
-    studentId: req.user.id,
-    rating: score,
-    text: String(text || '').trim(),
-    createdAt: new Date().toISOString(),
-  };
-  db.reviews.push(review);
-  notify(db, booking.specialistId, 'review_new', `Новый отзыв: ${score} из 5 о ваших консультациях`);
-  saveDb();
-  res.json({ review: { rating: review.rating, text: review.text, createdAt: review.createdAt } });
+  const createdAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO reviews (id, booking_id, specialist_id, student_id, rating, text, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(crypto.randomUUID(), booking.id, booking.specialistId, req.user.id, score, String(text || '').trim(), createdAt);
+  notify(booking.specialistId, 'review_new', `Новый отзыв: ${score} из 5 о ваших консультациях`);
+  res.json({ review: { rating: score, text: String(text || '').trim(), createdAt } });
 });
 
 /* --- уведомления --- */
 
 api.get('/notifications', requireAuth, (req, res) => {
-  const db = loadDb();
-  const list = db.notifications
-    .filter((n) => n.userId === req.user.id)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .map(({ id, type, text, read, createdAt }) => ({ id, type, text, read, createdAt }));
+  const list = db.prepare(`
+    SELECT id, type, text, read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC`)
+    .all(req.user.id)
+    .map(({ id, type, text, read, created_at }) => ({ id, type, text, read: !!read, createdAt: created_at }));
   res.json({ notifications: list, unread: list.filter((n) => !n.read).length });
 });
 
 api.post('/notifications/read', requireAuth, (req, res) => {
-  const db = loadDb();
-  db.notifications.forEach((n) => {
-    if (n.userId === req.user.id) n.read = true;
-  });
-  saveDb();
+  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
   res.json({ ok: true });
 });
