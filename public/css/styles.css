@@ -1176,3 +1176,166 @@ main.container {
     transform: none;
   }
 }
+
+/* --- мобильная версия --- */
+
+@media (max-width: 760px) {
+  .container {
+    padding: 0 12px;
+  }
+
+  .header__inner {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px 0;
+    gap: 8px 14px;
+  }
+
+  .logo {
+    font-size: 19px;
+    flex: 1;
+  }
+
+  .nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .header__user {
+    gap: 6px;
+  }
+
+  .user-chip {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  main.container {
+    padding-top: 18px;
+  }
+
+  .hero {
+    padding: 30px 16px;
+  }
+
+  .hero h1 {
+    font-size: 22px;
+  }
+
+  .hero p {
+    font-size: 15px;
+  }
+
+  .type-grid,
+  .spec-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .page-title {
+    font-size: 21px;
+  }
+
+  .page-head {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .stat-card b {
+    font-size: 18px;
+  }
+
+  .booking-card__head {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .booking-card__actions {
+    flex-wrap: wrap;
+  }
+
+  .field-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .field-row .field + .field {
+    margin-top: 14px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .modal {
+    max-width: 100%;
+    padding: 18px 16px;
+  }
+
+  .modal__actions {
+    flex-direction: column-reverse;
+  }
+
+  .modal__actions .btn {
+    width: 100%;
+  }
+
+  .bell__panel {
+    position: fixed;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    top: 62px;
+    max-height: calc(100vh - 80px);
+  }
+
+  .tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .q-details dl div {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .q-details dt {
+    min-width: 0;
+  }
+
+  .client-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .spec-head {
+    flex-direction: column;
+  }
+
+  .reminder-banner {
+    font-size: 13px;
+  }
+
+  #toast-root {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+  }
+}

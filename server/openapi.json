@@ -80,7 +80,7 @@
           "student": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" } } },
           "studentNote": { "type": "string", "description": "Видна только студенту" },
           "canReview": { "type": "boolean", "description": "Только студент: проведена и отзыв ещё не оставлен" },
-          "questionnaire": { "type": "object", "nullable": true, "description": "Только специалист", "properties": {
+          "questionnaire": { "type": "object", "nullable": true, "description": "Анкета первичного посещения — видна владельцу записи", "properties": {
             "course": { "type": "string" },
             "request": { "type": "string" },
             "experience": { "type": "string" },
@@ -391,6 +391,126 @@
         "summary": "Отметить все свои уведомления прочитанными",
         "security": [{ "bearerAuth": [] }],
         "responses": { "200": { "description": "Готово" }, "401": { "description": "Требуется вход" } }
+      }
+    },
+    "/api/notifications/{id}/read": {
+      "post": {
+        "tags": ["Уведомления"],
+        "summary": "Отметить прочитанным одно уведомление",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Готово" }, "404": { "description": "Не своё или несуществующее" } }
+      }
+    },
+    "/api/me": {
+      "patch": {
+        "tags": ["Кабинеты"],
+        "summary": "Сменить своё имя",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "maxLength": 80 } }
+        } } } },
+        "responses": {
+          "200": { "description": "Обновлённый профиль", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "user": { "$ref": "#/components/schemas/User" } }
+          } } } },
+          "400": { "description": "Имя пустое или слишком длинное" }
+        }
+      }
+    },
+    "/api/me/password": {
+      "post": {
+        "tags": ["Кабинеты"],
+        "summary": "Смена пароля с проверкой старого",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["oldPassword", "newPassword"], "properties": {
+            "oldPassword": { "type": "string" },
+            "newPassword": { "type": "string", "minLength": 6 }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Пароль изменён" },
+          "400": { "description": "Старый пароль неверен или новый короче 6 символов" }
+        }
+      }
+    },
+    "/api/my/notes": {
+      "get": {
+        "tags": ["Кабинеты"],
+        "summary": "Свои личные заметки, свежие сверху",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Список заметок", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "notes": { "type": "array", "items": {
+            "type": "object", "properties": {
+              "id": { "type": "string" }, "text": { "type": "string" },
+              "createdAt": { "type": "string", "format": "date-time" }, "updatedAt": { "type": "string", "format": "date-time" }
+            }
+          } } }
+        } } } }, "401": { "description": "Требуется вход" } }
+      },
+      "post": {
+        "tags": ["Кабинеты"],
+        "summary": "Добавить заметку (видна только автору)",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["text"], "properties": { "text": { "type": "string", "maxLength": 2000 } }
+        } } } },
+        "responses": { "200": { "description": "Заметка создана" }, "400": { "description": "Пустая или слишком длинная" } }
+      }
+    },
+    "/api/my/notes/{id}": {
+      "patch": {
+        "tags": ["Кабинеты"],
+        "summary": "Изменить свою заметку",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "Сохранено" }, "404": { "description": "Не своя или несуществующая" } }
+      },
+      "delete": {
+        "tags": ["Кабинеты"],
+        "summary": "Удалить свою заметку",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Удалена" }, "404": { "description": "Не своя или несуществующая" } }
+      }
+    },
+    "/api/bookings/{id}/questionnaire": {
+      "put": {
+        "tags": ["Записи"],
+        "summary": "Студент правит свою анкету, пока заявка не подтверждена",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuestionnaireInput" } } } },
+        "responses": {
+          "200": { "description": "Анкета обновлена" },
+          "400": { "description": "Заявка уже подтверждена или поля пустые" },
+          "403": { "description": "Не ваша запись" }
+        }
+      }
+    },
+    "/api/my/stats": {
+      "get": {
+        "tags": ["Кабинеты"],
+        "summary": "Сводка кабинета: у студента — предстоящие, проведённые, специалисты, отзывы; у специалиста — заявки, подтверждённые, проведённые, клиенты и рейтинг",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Числа кабинета", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "stats": {
+            "type": "object", "properties": {
+              "upcoming": { "type": "integer" },
+              "completed": { "type": "integer" },
+              "specialists": { "type": "integer", "description": "Только у студента" },
+              "reviewsLeft": { "type": "integer", "description": "Только у студента" },
+              "pending": { "type": "integer", "description": "Только у специалиста" },
+              "clients": { "type": "integer", "description": "Только у специалиста" },
+              "rating": { "type": "number", "description": "Только у специалиста" },
+              "reviews": { "type": "integer", "description": "Только у специалиста" }
+            }
+          } }
+        } } } }, "401": { "description": "Требуется вход" } }
       }
     }
   }
