@@ -1,6 +1,7 @@
 import { api } from '../api.js';
-import { esc, plural, fmtDate, fmtTime, toast, openModal, STATUS_INFO, FORMAT_LABELS } from '../ui.js';
+import { esc, plural, fmtDate, fmtTime, fmtRelativeDay, toast, openModal, STATUS_INFO, FORMAT_LABELS } from '../ui.js';
 import { state } from '../state.js';
+import { renderProfileTab } from './profile.js';
 
 const actions = (booking) => `
   <div class="booking-card__actions">
@@ -85,8 +86,9 @@ export async function renderSchedule(container) {
 
   let bookings;
   let clients;
+  let stats;
   try {
-    [{ bookings }, { clients }] = await Promise.all([api('/my/schedule'), api('/my/clients')]);
+    [{ bookings }, { clients }, { stats }] = await Promise.all([api('/my/schedule'), api('/my/clients'), api('/my/stats')]);
   } catch {
     container.innerHTML = '<p class="form-error">Не удалось загрузить расписание. Попробуйте обновить страницу.</p>';
     return;
@@ -95,25 +97,56 @@ export async function renderSchedule(container) {
   const requests = bookings.filter((b) => b.status === 'pending');
   const upcoming = bookings.filter((b) => b.status === 'confirmed');
   const archive = bookings.filter((b) => ['completed', 'cancelled'].includes(b.status)).reverse();
+  const soonest = upcoming.find((b) => new Date(b.start).getTime() - Date.now() <= 24 * 60 * 60 * 1000);
 
   container.innerHTML = `
-    <h1 class="page-title">Расписание</h1>
-    <div id="schedule-root">
-      <h2 class="section-title">Заявки — требуют решения</h2>
-      <div>${requests.length ? requests.map(scheduleCard).join('') : '<p class="form-hint">Новых заявок нет.</p>'}</div>
-      <h2 class="section-title">Подтверждённые</h2>
-      <div>${upcoming.length ? upcoming.map(scheduleCard).join('') : '<p class="form-hint">Подтверждённых консультаций нет.</p>'}</div>
-      <h2 class="section-title">Архив</h2>
-      <div>${archive.length ? archive.map(scheduleCard).join('') : '<p class="form-hint">Здесь будут проведённые и отменённые консультации.</p>'}</div>
-      <h2 class="section-title">Клиенты</h2>
-      <div class="clients">${clients.length ? clients.map((c) => `
-        <div class="client-row">
-          <span class="client-row__name">${esc(c.name)}</span>
-          <span class="client-row__meta">${c.visits} ${plural(c.visits, ['визит', 'визита', 'визитов'])} · последний: ${fmtDate(c.lastStart)}</span>
-        </div>`).join('') : '<p class="form-hint">Пока никто не записывался.</p>'}</div>
+    <h1 class="page-title">Личный кабинет специалиста</h1>
+    ${soonest ? `
+      <div class="reminder-banner">
+        ⏰ Консультация со студентом ${esc(soonest.student.name)} — ${fmtRelativeDay(soonest.start)} в ${fmtTime(soonest.start)}
+        (${FORMAT_LABELS[soonest.format]})
+      </div>` : ''}
+    <div id="cabinet-shell">
+      <div class="tabs">
+        <button class="tab tab--active" data-tab="schedule">Расписание</button>
+        <button class="tab" data-tab="profile">Профиль</button>
+      </div>
+      <div id="tab-body">
+        <div id="schedule-root">
+          <div class="stats-strip">
+            <div class="stat-card"><b>${stats.pending}</b><span>заявок ждёт решения</span></div>
+            <div class="stat-card"><b>${stats.upcoming}</b><span>подтверждено</span></div>
+            <div class="stat-card"><b>${stats.completed}</b><span>проведено</span></div>
+            <div class="stat-card"><b>${stats.rating}</b><span>рейтинг (${stats.reviews} ${plural(stats.reviews, ['отзыв', 'отзыва', 'отзывов'])})</span></div>
+          </div>
+          <h2 class="section-title">Заявки — требуют решения</h2>
+          <div>${requests.length ? requests.map(scheduleCard).join('') : '<p class="form-hint">Новых заявок нет.</p>'}</div>
+          <h2 class="section-title">Подтверждённые</h2>
+          <div>${upcoming.length ? upcoming.map(scheduleCard).join('') : '<p class="form-hint">Подтверждённых консультаций нет.</p>'}</div>
+          <h2 class="section-title">Архив</h2>
+          <div>${archive.length ? archive.map(scheduleCard).join('') : '<p class="form-hint">Здесь будут проведённые и отменённые консультации.</p>'}</div>
+          <h2 class="section-title">Клиенты</h2>
+          <div class="clients">${clients.length ? clients.map((c) => `
+            <div class="client-row">
+              <span class="client-row__name">${esc(c.name)}</span>
+              <span class="client-row__meta">${c.visits} ${plural(c.visits, ['визит', 'визита', 'визитов'])} · последний: ${fmtDate(c.lastStart)}</span>
+            </div>`).join('') : '<p class="form-hint">Пока никто не записывался.</p>'}</div>
+        </div>
+      </div>
     </div>`;
 
   const rerender = () => renderSchedule(container);
+
+  container.querySelector('#cabinet-shell').addEventListener('click', (event) => {
+    const tabBtn = event.target.closest('[data-tab]');
+    if (!tabBtn || tabBtn.classList.contains('tab--active')) return;
+    if (tabBtn.dataset.tab === 'profile') {
+      const body = container.querySelector('#tab-body');
+      body.innerHTML = '';
+      renderProfileTab(body);
+      container.querySelectorAll('.tab').forEach((t) => t.classList.toggle('tab--active', t.dataset.tab === 'profile'));
+    }
+  });
 
   container.querySelector('#schedule-root').addEventListener('click', async (event) => {
     const btn = event.target.closest('[data-action]');

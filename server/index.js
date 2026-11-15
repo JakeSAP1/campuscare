@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import swaggerUi from 'swagger-ui-express';
 import spec from './openapi.json' with { type: 'json' };
-import { api } from './api.js';
+import { api, sendDueReminders } from './api.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -18,3 +18,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`CampusCare: http://localhost:${PORT}`);
 });
+
+setInterval(sendDueReminders, 60 * 1000);

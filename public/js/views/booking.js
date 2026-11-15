@@ -84,3 +84,54 @@ export async function openBookingModal(slot, specialist) {
     }
   });
 }
+
+export function openQuestionnaireModal(booking, onDone) {
+  const q = booking.questionnaire || {};
+  const hadExperience = q.experience && !q.experience.startsWith('перв');
+
+  const { overlay, close } = openModal(`
+    <h2>Анкета к консультации</h2>
+    <p class="modal__meta">${esc(booking.specialist.name)} · ${fmtDate(booking.start)}, ${fmtTime(booking.start)}</p>
+    <form id="questionnaire-form">
+      <div class="field"><label>Курс и направление</label><input name="course" value="${esc(q.course || '')}" required></div>
+      <div class="field"><label>С каким запросом идёте</label><textarea name="request" rows="3" required>${esc(q.request || '')}</textarea></div>
+      <div class="field"><label>Опыт консультаций</label>
+        <select name="experience">
+          <option value="первый опыт" ${hadExperience ? '' : 'selected'}>Это первый опыт</option>
+          <option value="был опыт" ${hadExperience ? 'selected' : ''}>Обращался(ась) ранее</option>
+        </select>
+      </div>
+      <div class="field"><label>Дополнительно</label><textarea name="notes" rows="2">${esc(q.notes || '')}</textarea></div>
+      <p class="form-error" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close>Отмена</button>
+        <button type="submit" class="btn">Сохранить</button>
+      </div>
+    </form>`);
+
+  const form = overlay.querySelector('#questionnaire-form');
+  const error = overlay.querySelector('.form-error');
+  overlay.querySelector('[data-close]').addEventListener('click', close);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    try {
+      await api(`/bookings/${booking.id}/questionnaire`, {
+        method: 'PUT',
+        body: {
+          course: form.elements.course.value.trim(),
+          request: form.elements.request.value.trim(),
+          experience: form.elements.experience.value,
+          notes: form.elements.notes.value.trim(),
+        },
+      });
+      close();
+      toast('Анкета обновлена', 'success');
+      onDone();
+    } catch (err) {
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+  });
+}

@@ -36,6 +36,14 @@ export const fmtTime = (iso) =>
 export const fmtDateTime = (iso) =>
   new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+export const fmtRelativeDay = (iso) => {
+  const dayStart = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diff = Math.round((dayStart(new Date(iso)) - dayStart(new Date())) / 86400000);
+  if (diff === 0) return 'сегодня';
+  if (diff === 1) return 'завтра';
+  return fmtDate(iso);
+};
+
 export const STATUS_INFO = {
   pending: { label: 'Ожидает подтверждения', cls: 'status--pending' },
   confirmed: { label: 'Подтверждена', cls: 'status--confirmed' },

@@ -126,7 +126,11 @@ const bookingView = (booking, viewer) => {
     specialist: { id: booking.specialistId, name: booking.specialistName, typeLabel: TYPES[booking.specialistType] },
     student: { id: booking.studentId, name: booking.studentName },
     ...(isStudent
-      ? { studentNote: booking.studentNote, canReview: booking.status === 'completed' && !booking.hasReview }
+      ? {
+          studentNote: booking.studentNote,
+          canReview: booking.status === 'completed' && !booking.hasReview,
+          questionnaire: booking.questionnaire,
+        }
       : {}),
     ...(isSpecialist ? { questionnaire: booking.questionnaire, specNote: booking.specNote } : {}),
   };
@@ -195,7 +199,7 @@ api.post('/logout', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-api.get('/me', requireAuth, (req, res) => {
+export function sendDueReminders() {
   const now = Date.now();
   const due = db.prepare(`
     SELECT * FROM bookings
@@ -204,13 +208,39 @@ api.get('/me', requireAuth, (req, res) => {
 
   const markReminded = db.prepare('UPDATE bookings SET reminder_sent = 1 WHERE id = ?');
   for (const row of due) {
-    if (![row.student_id, row.specialist_id].includes(req.user.id)) continue;
     markReminded.run(row.id);
     notify(row.student_id, 'reminder', `Напоминание: консультация ${fmtServer(row.start)} (${row.format === 'online' ? 'онлайн' : 'очно'})`);
     notify(row.specialist_id, 'reminder', `Напоминание: консультация с ${userById(row.student_id).name} ${fmtServer(row.start)}`);
   }
+  return due.length;
+}
 
+api.get('/me', requireAuth, (req, res) => {
+  sendDueReminders();
   res.json({ user: publicUser(req.user) });
+});
+
+api.patch('/me', requireAuth, (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Укажите имя' });
+  if (name.length > 80) return res.status(400).json({ error: 'Имя слишком длинное' });
+
+  db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, req.user.id);
+  res.json({ user: publicUser(userById(req.user.id)) });
+});
+
+api.post('/me/password', requireAuth, (req, res) => {
+  const { oldPassword, newPassword } = req.body || {};
+  if (!verifyPassword(String(oldPassword || ''), req.user.passHash)) {
+    return res.status(400).json({ error: 'Старый пароль неверен' });
+  }
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: 'Новый пароль должен быть не короче 6 символов' });
+  }
+
+  db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?')
+    .run(hashPassword(String(newPassword)), req.user.id);
+  res.json({ ok: true });
 });
 
 /* --- каталог --- */
@@ -463,4 +493,113 @@ api.get('/notifications', requireAuth, (req, res) => {
 api.post('/notifications/read', requireAuth, (req, res) => {
   db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.user.id);
   res.json({ ok: true });
+});
+
+api.post('/notifications/:id/read', requireAuth, (req, res) => {
+  const result = db.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?')
+    .run(req.params.id, req.user.id);
+  if (!result.changes) return res.status(404).json({ error: 'Уведомление не найдено' });
+  res.json({ ok: true });
+});
+
+/* --- личный кабинет --- */
+
+api.get('/my/notes', requireAuth, (req, res) => {
+  const notes = db.prepare(`
+    SELECT id, text, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY updated_at DESC`)
+    .all(req.user.id)
+    .map(({ id, text, created_at, updated_at }) => ({ id, text, createdAt: created_at, updatedAt: updated_at }));
+  res.json({ notes });
+});
+
+api.post('/my/notes', requireAuth, (req, res) => {
+  const text = String((req.body || {}).text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Заметка пустая' });
+  if (text.length > 2000) return res.status(400).json({ error: 'Заметка слишком длинная' });
+
+  const id = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+  db.prepare('INSERT INTO notes (id, user_id, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+    .run(id, req.user.id, text, nowIso, nowIso);
+  res.json({ note: { id, text, createdAt: nowIso, updatedAt: nowIso } });
+});
+
+api.patch('/my/notes/:id', requireAuth, (req, res) => {
+  const text = String((req.body || {}).text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Заметка пустая' });
+
+  const result = db.prepare('UPDATE notes SET text = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    .run(text, new Date().toISOString(), req.params.id, req.user.id);
+  if (!result.changes) return res.status(404).json({ error: 'Заметка не найдена' });
+  res.json({ ok: true });
+});
+
+api.delete('/my/notes/:id', requireAuth, (req, res) => {
+  const result = db.prepare('DELETE FROM notes WHERE id = ? AND user_id = ?')
+    .run(req.params.id, req.user.id);
+  if (!result.changes) return res.status(404).json({ error: 'Заметка не найдена' });
+  res.json({ ok: true });
+});
+
+api.put('/bookings/:id/questionnaire', requireAuth, requireRole('student'), (req, res) => {
+  const booking = getBooking(req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Запись не найдена' });
+  if (booking.studentId !== req.user.id) return res.status(403).json({ error: 'Это не ваша запись' });
+  if (booking.status !== 'pending') return res.status(400).json({ error: 'Анкету можно менять, пока заявка не подтверждена' });
+
+  const q = req.body || {};
+  const course = String(q.course || '').trim();
+  const request = String(q.request || '').trim();
+  if (!course || !request) return res.status(400).json({ error: 'Заполните курс и запрос' });
+
+  db.prepare('UPDATE bookings SET questionnaire = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify({
+      course,
+      request,
+      experience: String(q.experience || '').trim(),
+      notes: String(q.notes || '').trim(),
+    }), new Date().toISOString(), booking.id);
+  res.json({ ok: true });
+});
+
+api.get('/my/stats', requireAuth, (req, res) => {
+  if (req.user.role === 'specialist') {
+    const consultations = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) AS upcoming,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        COUNT(DISTINCT student_id) AS clients
+      FROM bookings WHERE specialist_id = ? AND status != 'cancelled'`)
+      .get(req.user.id);
+    const rating = db.prepare('SELECT ROUND(COALESCE(AVG(rating), 0) * 10) / 10 AS rating, COUNT(*) AS reviews FROM reviews WHERE specialist_id = ?')
+      .get(req.user.id);
+    return res.json({
+      stats: {
+        completed: consultations.completed || 0,
+        upcoming: consultations.upcoming || 0,
+        pending: consultations.pending || 0,
+        clients: consultations.clients || 0,
+        rating: rating.rating,
+        reviews: rating.reviews,
+      },
+    });
+  }
+
+  const bookings = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status IN ('pending', 'confirmed') THEN 1 ELSE 0 END) AS upcoming,
+      COUNT(DISTINCT specialist_id) AS specialists
+    FROM bookings WHERE student_id = ? AND status != 'cancelled'`)
+    .get(req.user.id);
+  const reviewsLeft = db.prepare('SELECT COUNT(*) AS n FROM reviews WHERE student_id = ?').get(req.user.id).n;
+  res.json({
+    stats: {
+      completed: bookings.completed || 0,
+      upcoming: bookings.upcoming || 0,
+      specialists: bookings.specialists || 0,
+      reviewsLeft,
+    },
+  });
 });

@@ -6,6 +6,7 @@ import { renderCatalog } from './views/catalog.js';
 import { renderSpecialist } from './views/specialist.js';
 import { renderCabinet } from './views/student.js';
 import { renderSchedule } from './views/specialist-cab.js';
+import { renderNotifications } from './views/notifications.js';
 
 state.notifications = [];
 
@@ -68,13 +69,15 @@ function renderHeader() {
   bellBtn.addEventListener('click', async () => {
     if (panel.hidden) {
       panel.hidden = false;
-      panel.innerHTML = state.notifications.length
-        ? state.notifications.map((n) => `
-          <div class="bell__item ${n.read ? '' : 'bell__item--unread'}">
-            <p class="bell__text">${esc(n.text)}</p>
-            <span class="bell__date">${fmtDateTime(n.createdAt)}</span>
-          </div>`).join('')
-        : '<p class="bell__empty">Уведомлений пока нет</p>';
+      panel.innerHTML = `
+        ${state.notifications.length
+          ? state.notifications.map((n) => `
+            <div class="bell__item ${n.read ? '' : 'bell__item--unread'}">
+              <p class="bell__text">${esc(n.text)}</p>
+              <span class="bell__date">${fmtDateTime(n.createdAt)}</span>
+            </div>`).join('')
+          : '<p class="bell__empty">Уведомлений пока нет</p>'}
+        <a class="bell__all" href="#/notifications">Все уведомления</a>`;
       if (state.unread > 0) {
         try {
           await api('/notifications/read', { method: 'POST', body: {} });
@@ -118,6 +121,7 @@ const routes = [
   { pattern: /^\/specialist\/([\w-]+)$/, view: renderSpecialist },
   { pattern: /^\/cabinet$/, view: renderCabinet, role: 'student' },
   { pattern: /^\/schedule$/, view: renderSchedule, role: 'specialist' },
+  { pattern: /^\/notifications$/, view: renderNotifications, auth: true },
   { pattern: /^\/login$/, view: renderLogin },
   { pattern: /^\/register$/, view: renderRegister },
 ];
@@ -139,12 +143,12 @@ async function route() {
     return;
   }
 
-  if (current.route.role) {
+  if (current.route.auth || current.route.role) {
     if (!state.me) {
       location.hash = '#/login';
       return;
     }
-    if (state.me.role !== current.route.role) {
+    if (current.route.role && state.me.role !== current.route.role) {
       location.hash = '#/';
       return;
     }
