@@ -1,0 +1,397 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CampusCare API",
+    "description": "API системы записи на консультации и психологическую поддержку студентов. Все ответы — JSON; ошибки приходят в поле error. Доступ по Bearer-токену, полученному при входе или регистрации.",
+    "version": "1.0.0"
+  },
+  "servers": [{ "url": "/" }],
+  "tags": [
+    { "name": "Авторизация", "description": "Регистрация, вход, сессии" },
+    { "name": "Каталог", "description": "Специалисты, слоты, отзывы" },
+    { "name": "Записи", "description": "Заявки на консультации и их жизненный цикл" },
+    { "name": "Кабинеты", "description": "Данные студента и специалиста" },
+    { "name": "Уведомления", "description": "Колокольчик и напоминания" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "Error": { "type": "object", "properties": { "error": { "type": "string" } } },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "role": { "type": "string", "enum": ["student", "specialist"] },
+          "name": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "type": { "type": "string", "enum": ["psychologist", "career", "tutor"], "description": "Только у специалиста" },
+          "typeLabel": { "type": "string", "description": "Только у специалиста: Психолог / Карьерный консультант / Тьютор" },
+          "specialization": { "type": "string" },
+          "bio": { "type": "string" },
+          "formats": { "type": "array", "items": { "type": "string", "enum": ["online", "offline"] } },
+          "workFrom": { "type": "integer", "description": "Час начала приёма" },
+          "workTo": { "type": "integer", "description": "Час конца приёма" }
+        }
+      },
+      "SpecialistCard": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "typeLabel": { "type": "string" },
+          "specialization": { "type": "string" },
+          "formats": { "type": "array", "items": { "type": "string" } },
+          "rating": { "type": "number", "description": "Средняя оценка, 0 если отзывов нет" },
+          "reviewsCount": { "type": "integer" }
+        }
+      },
+      "Slot": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "start": { "type": "string", "format": "date-time" },
+          "durationMin": { "type": "integer" }
+        }
+      },
+      "ReviewPublic": {
+        "type": "object",
+        "description": "Анонимный отзыв — без автора",
+        "properties": {
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "text": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Booking": {
+        "type": "object",
+        "description": "Поля зависят от роли смотрящего: студент видит свои заметки и признак «можно оставить отзыв», специалист — анкету и свою заметку",
+        "properties": {
+          "id": { "type": "string" },
+          "start": { "type": "string", "format": "date-time" },
+          "durationMin": { "type": "integer" },
+          "format": { "type": "string", "enum": ["online", "offline"] },
+          "status": { "type": "string", "enum": ["pending", "confirmed", "completed", "cancelled"] },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "cancelReason": { "type": "string" },
+          "specialist": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "typeLabel": { "type": "string" } } },
+          "student": { "type": "object", "properties": { "id": { "type": "string" }, "name": { "type": "string" } } },
+          "studentNote": { "type": "string", "description": "Видна только студенту" },
+          "canReview": { "type": "boolean", "description": "Только студент: проведена и отзыв ещё не оставлен" },
+          "questionnaire": { "type": "object", "nullable": true, "description": "Только специалист", "properties": {
+            "course": { "type": "string" },
+            "request": { "type": "string" },
+            "experience": { "type": "string" },
+            "notes": { "type": "string" }
+          } },
+          "specNote": { "type": "string", "description": "Видна только специалисту" }
+        }
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["booking_new", "booking_confirmed", "booking_cancelled", "booking_rescheduled", "booking_completed", "review_new", "reminder"] },
+          "text": { "type": "string" },
+          "read": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "QuestionnaireInput": {
+        "type": "object",
+        "required": ["course", "request"],
+        "properties": {
+          "course": { "type": "string", "example": "3 курс, ИВТ" },
+          "request": { "type": "string", "example": "С чем приходите" },
+          "experience": { "type": "string", "example": "первый опыт" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/register": {
+      "post": {
+        "tags": ["Авторизация"],
+        "summary": "Регистрация студента или специалиста; сразу возвращает токен сессии",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object",
+            "required": ["role", "name", "email", "password"],
+            "properties": {
+              "role": { "type": "string", "enum": ["student", "specialist"] },
+              "name": { "type": "string" },
+              "email": { "type": "string", "format": "email" },
+              "password": { "type": "string", "minLength": 6 },
+              "specialist": {
+                "type": "object",
+                "description": "Только для роли specialist",
+                "properties": {
+                  "type": { "type": "string", "enum": ["psychologist", "career", "tutor"] },
+                  "specialization": { "type": "string" },
+                  "bio": { "type": "string" },
+                  "formats": { "type": "array", "items": { "type": "string", "enum": ["online", "offline"] } },
+                  "workFrom": { "type": "integer" },
+                  "workTo": { "type": "integer" }
+                }
+              }
+            }
+          } } }
+        },
+        "responses": {
+          "200": { "description": "Аккаунт создан", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "token": { "type": "string" }, "user": { "$ref": "#/components/schemas/User" } }
+          } } } },
+          "400": { "description": "Ошибка валидации", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/login": {
+      "post": {
+        "tags": ["Авторизация"],
+        "summary": "Вход по e-mail и паролю",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["email", "password"], "properties": { "email": { "type": "string" }, "password": { "type": "string" } }
+        } } } },
+        "responses": {
+          "200": { "description": "Токен сессии", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "token": { "type": "string" }, "user": { "$ref": "#/components/schemas/User" } }
+          } } } },
+          "401": { "description": "Неверный e-mail или пароль", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/logout": {
+      "post": {
+        "tags": ["Авторизация"],
+        "summary": "Выход: сессия удаляется",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Готово" }, "401": { "description": "Требуется вход" } }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": ["Авторизация"],
+        "summary": "Текущий пользователь; попутно отправляет напоминания о консультациях в ближайшие 24 часа",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Профиль", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "user": { "$ref": "#/components/schemas/User" } }
+          } } } },
+          "401": { "description": "Требуется вход" }
+        }
+      }
+    },
+    "/api/specialists": {
+      "get": {
+        "tags": ["Каталог"],
+        "summary": "Список специалистов с рейтингом; фильтры по типу и формату приёма",
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["psychologist", "career", "tutor"] } },
+          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["online", "offline"] } }
+        ],
+        "responses": { "200": { "description": "Каталог", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "specialists": { "type": "array", "items": { "$ref": "#/components/schemas/SpecialistCard" } } }
+        } } } } }
+      }
+    },
+    "/api/specialists/{id}": {
+      "get": {
+        "tags": ["Каталог"],
+        "summary": "Карточка специалиста целиком",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Профиль с рейтингом", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "specialist": { "allOf": [
+              { "$ref": "#/components/schemas/User" },
+              { "type": "object", "properties": { "rating": { "type": "number" }, "reviewsCount": { "type": "integer" } } }
+            ] } }
+          } } } },
+          "404": { "description": "Специалист не найден" }
+        }
+      }
+    },
+    "/api/specialists/{id}/slots": {
+      "get": {
+        "tags": ["Каталог"],
+        "summary": "Свободные будущие слоты специалиста, по возрастанию времени",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Слоты", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "slots": { "type": "array", "items": { "$ref": "#/components/schemas/Slot" } } }
+          } } } },
+          "404": { "description": "Специалист не найден" }
+        }
+      }
+    },
+    "/api/specialists/{id}/reviews": {
+      "get": {
+        "tags": ["Каталог"],
+        "summary": "Анонимные отзывы специалиста, свежие сверху",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Отзывы", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "reviews": { "type": "array", "items": { "$ref": "#/components/schemas/ReviewPublic" } } }
+          } } } },
+          "404": { "description": "Специалист не найден" }
+        }
+      }
+    },
+    "/api/bookings": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Заявка на слот. Перед первой консультацией у специалиста обязательна анкета; слот сразу помечается занятым",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["slotId", "format"], "properties": {
+            "slotId": { "type": "string" },
+            "format": { "type": "string", "enum": ["online", "offline"] },
+            "questionnaire": { "$ref": "#/components/schemas/QuestionnaireInput" }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Заявка создана в статусе pending", "content": { "application/json": { "schema": {
+            "type": "object", "properties": { "booking": { "$ref": "#/components/schemas/Booking" } }
+          } } } },
+          "400": { "description": "Слот недоступен, формат не поддерживается или нет анкеты" },
+          "403": { "description": "Только для студентов" }
+        }
+      }
+    },
+    "/api/my/bookings": {
+      "get": {
+        "tags": ["Кабинеты"],
+        "summary": "Все записи студента, свежие сверху",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Записи", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "bookings": { "type": "array", "items": { "$ref": "#/components/schemas/Booking" } } }
+        } } } }, "403": { "description": "Только для студентов" } }
+      }
+    },
+    "/api/my/schedule": {
+      "get": {
+        "tags": ["Кабинеты"],
+        "summary": "Расписание специалиста с анкетами, по возрастанию времени",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Записи", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "bookings": { "type": "array", "items": { "$ref": "#/components/schemas/Booking" } } }
+        } } } }, "403": { "description": "Только для специалистов" } }
+      }
+    },
+    "/api/my/clients": {
+      "get": {
+        "tags": ["Кабинеты"],
+        "summary": "Клиенты специалиста: кто, сколько визитов, когда был в последний раз",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Клиенты", "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "clients": { "type": "array", "items": {
+            "type": "object", "properties": {
+              "id": { "type": "string" }, "name": { "type": "string" }, "visits": { "type": "integer" }, "lastStart": { "type": "string", "format": "date-time" }
+            }
+          } } }
+        } } } }, "403": { "description": "Только для специалистов" } }
+      }
+    },
+    "/api/bookings/{id}/confirm": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Подтвердить заявку (студент или специалист записи)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Статус стал confirmed" },
+          "400": { "description": "Заявка не в статусе pending" },
+          "403": { "description": "Не ваша запись" }
+        }
+      }
+    },
+    "/api/bookings/{id}/cancel": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Отменить запись; слот освобождается, второй стороне уходит уведомление",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "reason": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "Статус стал cancelled" }, "403": { "description": "Не ваша запись" } }
+      }
+    },
+    "/api/bookings/{id}/reschedule": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Перенос: специалист выбирает другой свободный слот; запись снова ждёт подтверждения студента",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["slotId"], "properties": { "slotId": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "Время заменено" }, "403": { "description": "Только специалист этой записи" } }
+      }
+    },
+    "/api/bookings/{id}/complete": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Отметить консультацию проведённой (только специалист)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Статус стал completed" }, "403": { "description": "Только специалист этой записи" } }
+      }
+    },
+    "/api/bookings/{id}/spec-note": {
+      "post": {
+        "tags": ["Записи"],
+        "summary": "Личная заметка специалиста по консультации — студенту не отдаётся",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "properties": { "text": { "type": "string" } }
+        } } } },
+        "responses": { "200": { "description": "Заметка сохранена" }, "403": { "description": "Только специалист этой записи" } }
+      }
+    },
+    "/api/reviews": {
+      "post": {
+        "tags": ["Каталог"],
+        "summary": "Анонимный отзыв о проведённой консультации; один отзыв на запись",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["bookingId", "rating"], "properties": {
+            "bookingId": { "type": "string" },
+            "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "text": { "type": "string" }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Отзыв сохранён, рейтинг специалиста пересчитан" },
+          "400": { "description": "Консультация не проведена, отзыв уже есть или оценка не от 1 до 5" },
+          "403": { "description": "Только студент и только о своей записи" }
+        }
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "tags": ["Уведомления"],
+        "summary": "Свои уведомления, свежие сверху, с числом непрочитанных",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Список", "content": { "application/json": { "schema": {
+          "type": "object", "properties": {
+            "notifications": { "type": "array", "items": { "$ref": "#/components/schemas/Notification" } },
+            "unread": { "type": "integer" }
+          }
+        } } } }, "401": { "description": "Требуется вход" } }
+      }
+    },
+    "/api/notifications/read": {
+      "post": {
+        "tags": ["Уведомления"],
+        "summary": "Отметить все свои уведомления прочитанными",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "Готово" }, "401": { "description": "Требуется вход" } }
+      }
+    }
+  }
+}
